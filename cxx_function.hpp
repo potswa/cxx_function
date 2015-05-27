@@ -216,24 +216,55 @@ struct ptm_erasure
 
 DISPATCH_TABLE( ptm_erasure, target_type, ( typename target_type, typename ... sig ), ( target_type, sig ... ) )
 
-// TODO: allocator_erasure for the heap.
 
-/*template< typename alloc, typename payload >
-struct allocator_interface
-    : private alloc {
-    typedef alloc allocator_type;
-    allocator_type get_allocator() const noexcept
-        { return * static_cast< alloc const * >( this ); }
-    allocator_type & allocator_ref() noexcept
-        { return * static_cast< alloc * >( this ); }
+DISPATCH_BASE_CASE( allocator )
+#define ALLOCATOR_CASE( QUALS, UNSAFE ) DISPATCH_CASE( QUALS, IGNORE, allocator, ( \
+    return ( * static_cast< typename add_reference< derived QUALS >::type >( * this ).target ) \
+        ( std::forward< args >( a ) ... ); \
+) )
+DISPATCH_ALL( ALLOCATOR_CASE )
+#undef ALLOCATOR_CASE
 
-    payload object;
+template< typename allocator, typename target_type, typename ... sig >
+struct allocator_erasure
+    : erasure_base< sig ... >
+    , allocator
+    , erasure_special< allocator_erasure< allocator, target_type, sig ... > >
+    , allocator_dispatch< allocator_erasure< allocator, target_type, sig ... >, 0, sig ... > {
+    using allocator_erasure::erasure_special::destroy;
+    static const typename erasure_base< sig ... >::dispatch_table table;
     
-    allocator_interface( alloc && in_alloc, payload && in_payload )
-        : alloc( std::move( in_alloc ) ), payload( std::move( in_payload ) ) {}
-    allocator_interface( alloc && in_alloc, payload const & in_payload )
-        : alloc( std::move( in_alloc ) ), payload( in_payload ) {}
-};*/
+    typename std::allocator_traits< allocator >::pointer target;
+    
+    allocator & alloc() { return static_cast< allocator & >( * this ); }
+    target_type * target_address() { return std::addressof( * target ); }
+    void const * target_access() const { return std::addressof( * target ); }
+    
+    template< typename ... arg >
+    allocator_erasure( allocator in_alloc, arg && ... a )
+        : allocator_erasure::erasure_base( table )
+        , allocator( in_alloc )
+        , target( std::allocator_traits< allocator >::allocate( alloc(), 1 ) )
+        { std::allocator_traits< allocator >::construct( alloc(), target_address(), std::forward< arg >( a ) ... ); }
+    
+    ~ allocator_erasure()
+        { std::allocator_traits< allocator >::destroy( alloc(), target_address() ); }
+    
+    allocator_erasure( allocator_erasure && o ) noexcept
+        : allocator_erasure::erasure_base( table )
+        , allocator( std::move( o ) )
+        , target( std::move( o.target ) )
+        { o.target = nullptr; }
+    
+    allocator_erasure( allocator_erasure const & o )
+        : allocator_erasure::erasure_base( table )
+        , allocator( o )
+        , target( std::allocator_traits< allocator >::allocate( alloc(), 1 ) )
+        { std::allocator_traits< allocator >::construct( alloc(), target_address(), * o.target ); }
+};
+
+DISPATCH_TABLE( allocator_erasure, target_type, ( typename allocator, typename target_type, typename ... sig ), ( allocator, target_type, sig ... ) )
+
 
 DISPATCH_BASE_CASE( wrapper )
 #define WRAPPER_CASE( QUALS, UNSAFE ) DISPATCH_CASE( QUALS, UNSAFE, wrapper, ( \
@@ -298,19 +329,15 @@ class wrapper_base
             && std::is_nothrow_move_constructible< source >::value >::type >
         : std::true_type {};
     
-    template< typename source >
-    struct is_local_adoption
-        { static const bool value = ! is_compatibly_wrapped< source >::value && is_small< source >::value; };
-    
     // Local erasures.
-    template< typename source, typename ... arg
-        , typename = typename std::enable_if< is_local_adoption< source >::value >::type >
-    void init( any_piecewise_construct_tag< source >, arg && ... a )
+    template< typename source, typename ... arg >
+    typename std::enable_if< ! is_compatibly_wrapped< source >::value && is_small< source >::value >::type
+    init( any_piecewise_construct_tag< source >, arg && ... a )
         { new (& storage) local_erasure< source, sig ... >( std::forward< arg >( a ) ... ); }
     
-    template< typename alloc, typename source, typename ... arg
-        , typename = typename std::enable_if< is_local_adoption< source >::value >::type >
-    void init( std::allocator_arg_t, alloc const &, any_piecewise_construct_tag< source > t, arg && ... a )
+    template< typename allocator, typename source, typename ... arg >
+    typename std::enable_if< ! is_compatibly_wrapped< source >::value && is_small< source >::value >::type
+    init( std::allocator_arg_t, allocator const &, any_piecewise_construct_tag< source > t, arg && ... a )
         { init( t, std::forward< arg >( a ) ... ); }
     
     // PTMs are like local callables.
@@ -318,16 +345,30 @@ class wrapper_base
     void init( any_piecewise_construct_tag< t c::* >, t c::* ptm )
         { new (& storage) ptm_erasure< t c::*, sig ... >( ptm ); }
     
+    // Allocated erasures.
+    template< typename allocator, typename source, typename ... arg >
+    typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
+    init( std::allocator_arg_t, allocator const & alloc, any_piecewise_construct_tag< source >, arg && ... a ) {
+        typedef allocator_erasure< allocator, source, sig ... > erasure;
+        // TODO: Add a new erasure template to rebind the allocator and put the fancy pointer on the heap.
+        static_assert ( sizeof (erasure) <= sizeof storage, "Fancy pointer is too big for polymorphic function wrapper." );
+        new (& storage) erasure( alloc, std::forward< arg >( a ) ... );
+    }
+    template< typename source, typename ... arg >
+    typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
+    init( any_piecewise_construct_tag< source > t, arg && ... a )
+        { init( std::allocator_arg, std::allocator< source >{}, t, std::forward< arg >( a ) ... ); }
+    
     // Adoption by copy/move is implemented in terms of in-place construction.
-    template< typename source
-        , typename = typename std::enable_if< ! is_compatibly_wrapped< source >::value >::type >
-    void init( source && s )
+    template< typename source >
+    typename std::enable_if< ! is_compatibly_wrapped< source >::value >::type
+    init( source && s )
         { init( any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
     
-    template< typename alloc, typename source
-        , typename = typename std::enable_if< ! is_compatibly_wrapped< source >::value >::type >
-    void init( std::allocator_arg_t, alloc const &, source && s )
-        { init( any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
+    template< typename allocator, typename source >
+    typename std::enable_if< ! is_compatibly_wrapped< source >::value >::type
+    init( std::allocator_arg_t at, allocator const & alloc, source && s )
+        { init( at, alloc, any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
     
 public:
     erasure_xface & erasure() & { return reinterpret_cast< erasure_xface & >( storage ); }
@@ -380,6 +421,8 @@ public:
 template< typename ... sig >
 struct function
     : private impl::wrapper_base< sig ... > {
+    friend class impl::wrapper_base< sig ... >;
+    
     using function::wrapper_base::wrapper_base;
     using function::wrapper_base::operator ();
     using function::wrapper_base::operator =;
