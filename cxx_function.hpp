@@ -6,7 +6,7 @@
 #define INCLUDED_CXX_FUNCTION_HPP
 
 #include <exception>
-#include <functional> // only for std::bad_function_call
+#include <functional> // for std::bad_function_call and std::mem_fn
 #include <memory>
 #include <new>
 #include <tuple>
@@ -359,6 +359,9 @@ public:
         throw;
     }
     
+    void swap( wrapper_base & other )
+        { std::swap( * this, other ); }
+    
     std::type_info const & target_type() const noexcept
         { return std::get< + dispatch_slot::target_type >( erasure().table ); }
     
@@ -376,8 +379,13 @@ public:
 
 template< typename ... sig >
 struct function
-    : impl::wrapper_base< sig ... > {
+    : private impl::wrapper_base< sig ... > {
     using function::wrapper_base::wrapper_base;
+    using function::wrapper_base::operator ();
+    using function::wrapper_base::operator =;
+    using function::wrapper_base::swap;
+    using function::wrapper_base::target;
+    using function::wrapper_base::target_type;
 };
 
 
