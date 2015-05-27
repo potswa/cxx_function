@@ -41,6 +41,9 @@ enum class dispatch_slot {
     destructor,
     move_constructor,
     copy_constructor,
+    target_access,
+    target_type,
+    
     base_index
 };
 constexpr int operator + ( dispatch_slot e ) { return static_cast< int >( e ); }
@@ -53,6 +56,9 @@ struct erasure_base {
         void (erasure_base::*)(), // destructor
         void (erasure_base::*)( void * ) &&, // move constructor
         void (erasure_base::*)( void * ) const &, // copy constructor
+        
+        void const * (erasure_base::*)() const, // target access
+        std::type_info const &, // target_type
         
         sig erasure_base::* ... // dispatchers
     > dispatch_table;
@@ -117,15 +123,16 @@ struct NAME ## _dispatch< derived, table_index, ret( args ... ) QUALS, sig ... >
 // However, [expr.mptr.oper]/4 mentions dynamic type, which suggests that the overall usage is OK.
 template< typename base, typename derived, typename t, typename actual_base >
 t base::* ptm_cast( t actual_base::* ptm )
-    { static_assert ( std::is_base_of< base, derived >::value, "Not a base class." );
-    return static_cast< t base::* >( static_cast< t derived::* >( ptm ) ); }
+    { return static_cast< t base::* >( static_cast< t derived::* >( ptm ) ); }
 
-#define DISPATCH_TABLE( NAME, TPARAM, TARG ) \
+#define DISPATCH_TABLE( NAME, TARGET_TYPE, TPARAM, TARG ) \
 template< UNPACK TPARAM > \
 typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::table = { \
     ptm_cast< erasure_base< sig ... >, NAME >( & NAME::destroy ), \
     ptm_cast< erasure_base< sig ... >, NAME >( & NAME::move ), \
     ptm_cast< erasure_base< sig ... >, NAME >( & NAME::copy ), \
+    ptm_cast< erasure_base< sig ... >, NAME >( & NAME::target_access ), \
+    typeid (TARGET_TYPE), \
     ptm_cast< erasure_base< sig ... >, NAME >( static_cast< sig NAME::* >( & NAME::operator () ) ) ... \
 };
 
@@ -141,11 +148,13 @@ struct null_erasure
     , null_dispatch< null_erasure< sig ... >, 0, sig ... > {
     static const typename erasure_base< sig ... >::dispatch_table table;
     
+    void const * target_access() const { return nullptr; }
+    
     null_erasure() noexcept
         : null_erasure::erasure_base( table ) {}
 };
 
-DISPATCH_TABLE( null_erasure, ( typename ... sig ), ( sig ... ) )
+DISPATCH_TABLE( null_erasure, void, ( typename ... sig ), ( sig ... ) )
 
 
 template< typename t >
@@ -172,13 +181,15 @@ struct local_erasure
     
     target_type target;
     
+    void const * target_access() const { return & target; }
+    
     template< typename ... arg >
     local_erasure( arg && ... a )
         : local_erasure::erasure_base( table )
         , target( std::forward< arg >( a ) ... ) {}
 };
 
-DISPATCH_TABLE( local_erasure, ( typename target_type, typename ... sig ), ( target_type, sig ... ) )
+DISPATCH_TABLE( local_erasure, target_type, ( typename target_type, typename ... sig ), ( target_type, sig ... ) )
 
 // TODO: ptm_erasure using a decltype< mem_fn > target, allocator_erasure for the heap.
 
@@ -202,7 +213,6 @@ struct allocator_interface
 DISPATCH_BASE_CASE( wrapper )
 #define WRAPPER_CASE( QUALS, UNSAFE ) DISPATCH_CASE( QUALS, UNSAFE, wrapper, ( \
     auto && self = static_cast< typename add_reference< derived QUALS >::type >( * this ); \
-    boolalpha( std::cout ); \
     return ( std::forward< decltype (self) >( self ).erasure() \
             .* std::get< + dispatch_slot::base_index + table_index >( self.erasure().table ) ) \
         ( std::forward< args >( a ) ... ); \
@@ -318,6 +328,18 @@ public:
         init();
         throw;
     }
+    
+    std::type_info const & target_type() const noexcept
+        { return std::get< + dispatch_slot::target_type >( erasure().table ); }
+    
+    template< typename want >
+    want const * target() const noexcept {
+        if ( typeid (want) != target_type() ) return nullptr;
+        return static_cast< want const * >( ( erasure() .* std::get< + dispatch_slot::target_access >( erasure().table ) )() );
+    }
+    template< typename want >
+    want * target() noexcept
+        { return const_cast< want * >( static_cast< wrapper_base const & >( * this ).target< want >() ); }
 };
 
 }
