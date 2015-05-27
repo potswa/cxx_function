@@ -191,7 +191,32 @@ struct local_erasure
 
 DISPATCH_TABLE( local_erasure, target_type, ( typename target_type, typename ... sig ), ( target_type, sig ... ) )
 
-// TODO: ptm_erasure using a decltype< mem_fn > target, allocator_erasure for the heap.
+DISPATCH_BASE_CASE( ptm )
+#define PTM_CASE( QUALS, UNSAFE ) DISPATCH_CASE( QUALS, IGNORE, ptm, ( \
+    return std::mem_fn( static_cast< derived const volatile & >( * this ).target )( std::forward< args >( a ) ... ); \
+) )
+DISPATCH_ALL( PTM_CASE )
+#undef PTM_CASE
+
+template< typename target_type, typename ... sig >
+struct ptm_erasure
+    : erasure_base< sig ... >
+    , erasure_special< ptm_erasure< target_type, sig ... > >
+    , ptm_dispatch< ptm_erasure< target_type, sig ... >, 0, sig ... > {
+    static const typename erasure_base< sig ... >::dispatch_table table;
+    
+    target_type target;
+    
+    void const * target_access() const { return & target; }
+    
+    ptm_erasure( target_type a )
+        : ptm_erasure::erasure_base( table )
+        , target( a ) {}
+};
+
+DISPATCH_TABLE( ptm_erasure, target_type, ( typename target_type, typename ... sig ), ( target_type, sig ... ) )
+
+// TODO: allocator_erasure for the heap.
 
 /*template< typename alloc, typename payload >
 struct allocator_interface
@@ -287,6 +312,11 @@ class wrapper_base
         , typename = typename std::enable_if< is_local_adoption< source >::value >::type >
     void init( std::allocator_arg_t, alloc const &, any_piecewise_construct_tag< source > t, arg && ... a )
         { init( t, std::forward< arg >( a ) ... ); }
+    
+    // PTMs are like local callables.
+    template< typename t, typename c >
+    void init( any_piecewise_construct_tag< t c::* >, t c::* ptm )
+        { new (& storage) ptm_erasure< t c::*, sig ... >( ptm ); }
     
     // Adoption by copy/move is implemented in terms of in-place construction.
     template< typename source
