@@ -293,6 +293,7 @@ class wrapper_base
     typedef erasure_base< sig ... > erasure_xface;
     
     std::aligned_storage< sizeof (void *[4]) >::type storage;
+    void * storage_address() { return & storage; }
     
     // These functions enter or recover from invalid states.
     // They get on the right side of [basic.life]/7.4, but mind the exceptions.
@@ -301,15 +302,15 @@ class wrapper_base
         { ( erasure() .* std::get< + dispatch_slot::destructor >( erasure().table ) )(); }
     
     void init( std::nullptr_t = {} ) noexcept
-        { new (& storage) null_erasure< sig ... >; }
+        { new (storage_address()) null_erasure< sig ... >; }
     
     void init( wrapper_base && o ) noexcept {
-        ( std::move( o ).erasure() .* std::get< + dispatch_slot::move_constructor >( o.erasure().table ) )( & storage );
+        ( std::move( o ).erasure() .* std::get< + dispatch_slot::move_constructor >( o.erasure().table ) )( storage_address() );
         o = nullptr;
     }
     
     void init( wrapper_base const & o )
-        { ( o.erasure() .* std::get< + dispatch_slot::copy_constructor >( o.erasure().table ) )( & storage ); }
+        { ( o.erasure() .* std::get< + dispatch_slot::copy_constructor >( o.erasure().table ) )( storage_address() ); }
     
     void init( unique_function< sig ... > const & o ) = delete;
     
@@ -326,6 +327,7 @@ class wrapper_base
     template< typename source >
     struct is_small< source, typename std::enable_if<
             sizeof (local_erasure< source, sig ... >) <= sizeof (storage)
+            && alignof (source) <= alignof (decltype (storage))
             && std::is_nothrow_move_constructible< source >::value >::type >
         : std::true_type {};
     
@@ -333,7 +335,7 @@ class wrapper_base
     template< typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && is_small< source >::value >::type
     init( any_piecewise_construct_tag< source >, arg && ... a )
-        { new (& storage) local_erasure< source, sig ... >( std::forward< arg >( a ) ... ); }
+        { new (storage_address()) local_erasure< source, sig ... >( std::forward< arg >( a ) ... ); }
     
     template< typename allocator, typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && is_small< source >::value >::type
@@ -343,7 +345,7 @@ class wrapper_base
     // PTMs are like local callables.
     template< typename t, typename c >
     void init( any_piecewise_construct_tag< t c::* >, t c::* ptm )
-        { new (& storage) ptm_erasure< t c::*, sig ... >( ptm ); }
+        { new (storage_address()) ptm_erasure< t c::*, sig ... >( ptm ); }
     
     // Allocated erasures.
     template< typename allocator, typename source, typename ... arg >
@@ -352,7 +354,7 @@ class wrapper_base
         typedef allocator_erasure< allocator, source, sig ... > erasure;
         // TODO: Add a new erasure template to rebind the allocator and put the fancy pointer on the heap.
         static_assert ( sizeof (erasure) <= sizeof storage, "Fancy pointer is too big for polymorphic function wrapper." );
-        new (& storage) erasure( alloc, std::forward< arg >( a ) ... );
+        new (storage_address()) erasure( alloc, std::forward< arg >( a ) ... );
     }
     template< typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
