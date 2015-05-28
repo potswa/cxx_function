@@ -113,11 +113,10 @@ struct NAME ## _dispatch< derived, table_index, ret( args ... ) QUALS, sig ... >
     ret operator () ( args ... a ) QUALS { UNPACK IMPL } \
 };
 
-#define DISPATCH_CQ( MACRO, UNSAFE, QUALS ) MACRO( QUALS, UNSAFE ) MACRO( const QUALS, UNSAFE )
+#define DISPATCH_CQ( MACRO, UNSAFE, QUALS ) MACRO( QUALS, UNSAFE ) MACRO( const QUALS, IGNORE )
 #define DISPATCH_CV( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, IGNORE, volatile QUALS )
-#define DISPATCH_CVREFQ( MACRO, UNSAFE, QUALS ) \
-    DISPATCH_CV( MACRO, UNSAFE, QUALS ) DISPATCH_CV( MACRO, IGNORE, & QUALS ) DISPATCH_CV( MACRO, IGNORE, && QUALS )
-#define DISPATCH_ALL( MACRO ) DISPATCH_CVREFQ( MACRO, UNPACK, )
+#define DISPATCH_CVREFQ( MACRO, QUALS ) DISPATCH_CV( MACRO, IGNORE, & QUALS ) DISPATCH_CV( MACRO, IGNORE, && QUALS )
+#define DISPATCH_ALL( MACRO ) DISPATCH_CV( MACRO, UNPACK, ) DISPATCH_CVREFQ( MACRO, )
 
 // A bogus base member is undefined, [expr.static.cast]/12.
 // However, [expr.mptr.oper]/4 mentions dynamic type, which suggests that the overall usage is OK.
@@ -373,14 +372,10 @@ class wrapper_base
         { init( at, alloc, any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
     
 public:
-    erasure_xface & erasure() & { return reinterpret_cast< erasure_xface & >( storage ); }
-    erasure_xface const & erasure() const & { return reinterpret_cast< erasure_xface const & >( storage ); }
-    erasure_xface volatile & erasure() volatile & { return reinterpret_cast< erasure_xface volatile & >( storage ); }
-    erasure_xface const volatile & erasure() const volatile & { return reinterpret_cast< erasure_xface const volatile & >( storage ); }
-    erasure_xface && erasure() && { return reinterpret_cast< erasure_xface && >( storage ); }
-    erasure_xface const && erasure() const && { return reinterpret_cast< erasure_xface const && >( storage ); }
-    erasure_xface volatile && erasure() volatile && { return reinterpret_cast< erasure_xface volatile && >( storage ); }
-    erasure_xface const volatile && erasure() const volatile && { return reinterpret_cast< erasure_xface const volatile && >( storage ); }
+    #define ERASURE_ACCESS( QUALS, UNSAFE ) \
+        erasure_xface QUALS erasure() QUALS { return reinterpret_cast< erasure_xface QUALS >( storage ); }
+    DISPATCH_CVREFQ( ERASURE_ACCESS, )
+    #undef ERASURE_ACCESS
     
     template< typename ... arg >
     wrapper_base( arg && ... a )
