@@ -341,11 +341,18 @@ class wrapper_base
     init( std::allocator_arg_t, allocator const &, any_piecewise_construct_tag< source > t, arg && ... a )
         { init( t, std::forward< arg >( a ) ... ); }
     
+    // Pointers are local callables.
+    template< typename t >
+    void init( any_piecewise_construct_tag< t * >, t * p ) {
+        if ( p ) new (storage_address()) local_erasure< t *, sig ... >( p );
+        else init();
+    }
     // PTMs are like local callables.
     template< typename t, typename c >
-    void init( any_piecewise_construct_tag< t c::* >, t c::* ptm )
-        { new (storage_address()) ptm_erasure< t c::*, sig ... >( ptm ); }
-    
+    void init( any_piecewise_construct_tag< t c::* >, t c::* ptm ) {
+        if ( ptm ) new (storage_address()) ptm_erasure< t c::*, sig ... >( ptm );
+        else init();
+    }
     // Allocated erasures.
     template< typename allocator, typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
@@ -411,6 +418,9 @@ public:
     template< typename want >
     want * target() noexcept
         { return const_cast< want * >( static_cast< wrapper_base const & >( * this ).target< want >() ); }
+    
+    explicit operator bool () const noexcept
+        { return target_type() != typeid (void); }
 };
 
 }
@@ -426,8 +436,21 @@ struct function
     using function::wrapper_base::swap;
     using function::wrapper_base::target;
     using function::wrapper_base::target_type;
+    using function::wrapper_base::operator bool;
 };
 
+template< typename ... sig >
+bool operator == ( function< sig ... > const & a, std::nullptr_t )
+    { return !a; }
+template< typename ... sig >
+bool operator != ( function< sig ... > const & a, std::nullptr_t )
+    { return a; }
+template< typename ... sig >
+bool operator == ( std::nullptr_t, function< sig ... > const & a )
+    { return !a; }
+template< typename ... sig >
+bool operator != ( std::nullptr_t, function< sig ... > const & a )
+    { return a; }
 
 }
 

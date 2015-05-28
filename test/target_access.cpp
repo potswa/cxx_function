@@ -19,7 +19,7 @@ int main() {
     * alias = 3;
     assert ( f.target_type() == typeid (vf) );
     assert ( f.target< vf >()->m == 3 );
-    assert ( std::function< void() >().target_type() == typeid (void) );
-    assert ( std::function< void() >().target< void >() == nullptr );
+    assert ( function< void() >().target_type() == typeid (void) );
+    assert ( function< void() >().target< void >() == nullptr );
 }
 
