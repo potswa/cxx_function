@@ -101,7 +101,7 @@ template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_constructible< derived, derived >::value >::type
 ( erasure_special< derived >::* erasure_move () ) ( void * ) &&
-    { return & derived::erasure_special::copy; }
+    { return & derived::erasure_special::move; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_constructible< derived, derived >::value >::type
