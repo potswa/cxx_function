@@ -218,8 +218,9 @@ DISPATCH_TABLE( ptm_erasure, target_type, ( typename target_type, typename ... s
 
 DISPATCH_BASE_CASE( allocator )
 #define ALLOCATOR_CASE( QUALS, UNSAFE ) DISPATCH_CASE( QUALS, IGNORE, allocator, ( \
-    return ( * static_cast< typename add_reference< derived QUALS >::type >( * this ).target ) \
-        ( std::forward< args >( a ) ... ); \
+    return static_cast< typename add_reference< decltype (derived::target) QUALS >::type >( * \
+            static_cast< typename add_reference< derived QUALS >::type >( * this ) \
+        .target )( std::forward< args >( a ) ... ); \
 ) )
 DISPATCH_ALL( ALLOCATOR_CASE )
 #undef ALLOCATOR_CASE
@@ -246,9 +247,12 @@ struct allocator_erasure
         , target( std::allocator_traits< allocator >::allocate( alloc(), 1 ) )
         { std::allocator_traits< allocator >::construct( alloc(), target_address(), std::forward< arg >( a ) ... ); }
     
-    ~ allocator_erasure()
-        { std::allocator_traits< allocator >::destroy( alloc(), target_address() ); }
-    
+    ~ allocator_erasure() {
+        if ( target ) {
+            std::allocator_traits< allocator >::destroy( alloc(), target_address() );
+            std::allocator_traits< allocator >::deallocate( alloc(), target, 1 );
+        }
+    }
     allocator_erasure( allocator_erasure && o ) noexcept
         : allocator_erasure::erasure_base( table )
         , allocator( std::move( o ) )
@@ -264,6 +268,45 @@ struct allocator_erasure
 
 DISPATCH_TABLE( allocator_erasure, target_type, ( typename allocator, typename target_type, typename ... sig ), ( allocator, target_type, sig ... ) )
 
+
+template< bool ... cond >
+struct enable_if_all
+    { typedef void type; };
+template< bool ... cond >
+struct enable_if_all< true, cond ... >
+    : enable_if_all< cond ... > {};
+template< bool ... cond >
+struct enable_if_all< false, cond ... >
+    {};
+
+template< typename t, typename sig, typename = void >
+struct is_callable : std::false_type {};
+
+#define IS_CALLABLE_CASE( QUALS, UNSAFE ) \
+template< typename t, typename ret, typename ... arg > \
+struct is_callable< t, ret( arg ... ) QUALS, \
+    typename std::enable_if< std::is_convertible< \
+        typename std::result_of< typename add_reference< t QUALS >::type ( arg ... ) >::type \
+    , ret >::value >::type > \
+    : std::true_type {};
+
+DISPATCH_ALL( IS_CALLABLE_CASE )
+#undef IS_CALLABLE_CASE
+
+template< typename sig >
+struct is_callable< std::nullptr_t, sig >
+    : std::true_type {};
+
+template< typename source >
+struct is_noexcept_erasable : std::false_type {};
+template<>
+struct is_noexcept_erasable< std::nullptr_t > : std::true_type {};
+template< typename t >
+struct is_noexcept_erasable< t * > : std::true_type {};
+template< typename t, typename c >
+struct is_noexcept_erasable< t c::* > : std::true_type {};
+template< typename t >
+struct is_noexcept_erasable< std::reference_wrapper< t > > : std::true_type {};
 
 DISPATCH_BASE_CASE( wrapper )
 #define WRAPPER_CASE( QUALS, UNSAFE ) DISPATCH_CASE( QUALS, UNSAFE, wrapper, ( \
@@ -294,31 +337,12 @@ class wrapper_base
     std::aligned_storage< sizeof (void *[4]) >::type storage;
     void * storage_address() { return & storage; }
     
-    // These functions enter or recover from invalid states.
-    // They get on the right side of [basic.life]/7.4, but mind the exceptions.
-    
-    void destroy() noexcept
-        { ( erasure() .* std::get< + dispatch_slot::destructor >( erasure().table ) )(); }
-    
-    void init( std::nullptr_t = {} ) noexcept
-        { new (storage_address()) null_erasure< sig ... >; }
-    
-    void init( wrapper_base && o ) noexcept {
-        ( std::move( o ).erasure() .* std::get< + dispatch_slot::move_constructor >( o.erasure().table ) )( storage_address() );
-        o = nullptr;
-    }
-    
-    void init( wrapper_base const & o )
-        { ( o.erasure() .* std::get< + dispatch_slot::copy_constructor >( o.erasure().table ) )( storage_address() ); }
-    
-    void init( unique_function< sig ... > const & o ) = delete;
-    
     // Queries on potential targets.
     template< typename, typename = void >
     struct is_compatibly_wrapped : std::false_type {};
     template< typename source >
     struct is_compatibly_wrapped< source, typename std::enable_if<
-            std::is_same< wrapper_base, typename std::decay< source >::type::wrapper_base >::value >::type >
+            std::is_same< wrapper_base, typename source::wrapper_base >::value >::type >
         : std::true_type {};
     
     template< typename, typename = void >
@@ -330,36 +354,58 @@ class wrapper_base
             && std::is_nothrow_move_constructible< source >::value >::type >
         : std::true_type {};
     
+    // These functions enter or recover from invalid states.
+    // They get on the right side of [basic.life]/7.4, but mind the exceptions.
+    
+    void destroy() noexcept
+        { ( erasure() .* std::get< + dispatch_slot::destructor >( erasure().table ) )(); }
+    
+    // Default, move, and copy.
+    void init( any_piecewise_construct_tag< std::nullptr_t >, std::nullptr_t ) noexcept
+        { new (storage_address()) null_erasure< sig ... >; }
+    
+    template< typename source >
+    typename std::enable_if< is_compatibly_wrapped< source >::value >::type
+    init( any_piecewise_construct_tag< source >, wrapper_base && o ) noexcept {
+        ( std::move( o ).erasure() .* std::get< + dispatch_slot::move_constructor >( o.erasure().table ) )( storage_address() );
+        o = nullptr;
+    }
+    template< typename source >
+    typename std::enable_if< is_compatibly_wrapped< source >::value >::type
+    init( any_piecewise_construct_tag< source >, wrapper_base const & o )
+        { ( o.erasure() .* std::get< + dispatch_slot::copy_constructor >( o.erasure().table ) )( storage_address() ); }
+    
     // Local erasures.
     template< typename source, typename ... arg >
-    typename std::enable_if< ! is_compatibly_wrapped< source >::value && is_small< source >::value >::type
+    typename std::enable_if< is_small< source >::value >::type
     init( any_piecewise_construct_tag< source >, arg && ... a )
         { new (storage_address()) local_erasure< source, sig ... >( std::forward< arg >( a ) ... ); }
     
     template< typename allocator, typename source, typename ... arg >
-    typename std::enable_if< ! is_compatibly_wrapped< source >::value && is_small< source >::value >::type
+    typename std::enable_if< is_compatibly_wrapped< source >::value || is_small< source >::value >::type
     init( std::allocator_arg_t, allocator const &, any_piecewise_construct_tag< source > t, arg && ... a )
         { init( t, std::forward< arg >( a ) ... ); }
     
     // Pointers are local callables.
     template< typename t >
-    void init( any_piecewise_construct_tag< t * >, t * p ) {
+    void init( any_piecewise_construct_tag< t * >, t * p ) noexcept {
         if ( p ) new (storage_address()) local_erasure< t *, sig ... >( p );
-        else init();
+        else init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr );
     }
     // PTMs are like local callables.
     template< typename t, typename c >
-    void init( any_piecewise_construct_tag< t c::* >, t c::* ptm ) {
+    void init( any_piecewise_construct_tag< t c::* >, t c::* ptm ) noexcept {
         if ( ptm ) new (storage_address()) ptm_erasure< t c::*, sig ... >( ptm );
-        else init();
+        else init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr );
     }
+    
     // Allocated erasures.
     template< typename allocator, typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
     init( std::allocator_arg_t, allocator const & alloc, any_piecewise_construct_tag< source >, arg && ... a ) {
         typedef allocator_erasure< allocator, source, sig ... > erasure;
         // TODO: Add a new erasure template to rebind the allocator and put the fancy pointer on the heap.
-        static_assert ( sizeof (erasure) <= sizeof storage, "Fancy pointer is too big for polymorphic function wrapper." );
+        static_assert ( sizeof (erasure) <= sizeof storage, "Stateful allocator or fancy pointer is too big for polymorphic function wrapper." );
         new (storage_address()) erasure( alloc, std::forward< arg >( a ) ... );
     }
     template< typename source, typename ... arg >
@@ -367,27 +413,56 @@ class wrapper_base
     init( any_piecewise_construct_tag< source > t, arg && ... a )
         { init( std::allocator_arg, std::allocator< source >{}, t, std::forward< arg >( a ) ... ); }
     
-    // Adoption by copy/move is implemented in terms of in-place construction.
-    template< typename source >
-    typename std::enable_if< ! is_compatibly_wrapped< source >::value >::type
-    init( source && s )
-        { init( any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
-    
-    template< typename allocator, typename source >
-    typename std::enable_if< ! is_compatibly_wrapped< source >::value >::type
-    init( std::allocator_arg_t at, allocator const & alloc, source && s )
-        { init( at, alloc, any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
-    
 public:
     #define ERASURE_ACCESS( QUALS, UNSAFE ) \
         erasure_xface QUALS erasure() QUALS { return reinterpret_cast< erasure_xface QUALS >( storage ); }
     DISPATCH_CVREFQ( ERASURE_ACCESS, )
     #undef ERASURE_ACCESS
     
-    template< typename ... arg >
-    wrapper_base( arg && ... a )
-        noexcept(noexcept( init( std::forward< arg >( a ) ... ) ))
-        { init( std::forward< arg >( a ) ... ); }
+    wrapper_base() noexcept
+        { init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr ); }
+    wrapper_base( wrapper_base && s ) noexcept
+        { init( any_piecewise_construct_tag< wrapper_base >{}, move( s ) ); }
+    wrapper_base( wrapper_base const & s )
+        { init( any_piecewise_construct_tag< wrapper_base >{}, s ); }
+    
+    template< typename source,
+        typename = typename enable_if_all<
+            is_callable< typename std::decay< source >::type, sig >::value ...,
+            std::is_constructible< typename std::decay< source >::type, source >::value
+        >::type >
+    wrapper_base( source && s )
+    noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value || is_compatibly_wrapped< source >::value )
+        { init( any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
+    
+    template< typename allocator, typename source,
+        typename = typename enable_if_all<
+            is_callable< typename std::decay< source >::type, sig >::value ...,
+            std::is_constructible< typename std::decay< source >::type, source >::value
+        >::type >
+    wrapper_base( std::allocator_arg_t, allocator const & alloc, source && s )
+    noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value || is_compatibly_wrapped< source >::value )
+        { init( std::allocator_arg, alloc, any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
+    
+    template< typename source, typename ... arg,
+        typename = typename enable_if_all<
+            is_callable< source, sig >::value ...,
+            std::is_constructible< source, arg ... >::value
+        >::type >
+    wrapper_base( any_piecewise_construct_tag< source > t, arg && ... a )
+    noexcept( is_noexcept_erasable< source >::value
+        || ( is_compatibly_wrapped< source >::value && std::is_nothrow_constructible< source, arg ... >::value ) )
+        { init( t, std::forward< arg >( a ) ... ); }
+    
+    template< typename allocator, typename source, typename ... arg,
+        typename = typename enable_if_all<
+            is_callable< source, sig >::value ...,
+            std::is_constructible< source, arg ... >::value
+        >::type >
+    wrapper_base( std::allocator_arg_t, allocator const & alloc, any_piecewise_construct_tag< source > t, arg && ... a )
+    noexcept( is_noexcept_erasable< source >::value
+        || ( is_compatibly_wrapped< source >::value && std::is_nothrow_constructible< source, arg ... >::value ) )
+        { init( std::allocator_arg, alloc, t, std::forward< arg >( a ) ... ); }
     
     ~ wrapper_base() noexcept
         { destroy(); }
