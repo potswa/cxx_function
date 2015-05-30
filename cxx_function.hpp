@@ -80,13 +80,39 @@ struct erasure_special {
         { new (dest) derived( * static_cast< derived const * >( this ) ); }
 };
 
-// This accessor avoids instantiating erasure_special::copy for non-copyable types.
+// These accessors avoid instantiating functions that do not exist or would be trivial.
 template< typename derived >
-constexpr typename std::enable_if< std::is_copy_constructible< derived >::value >::type
+constexpr typename std::enable_if<
+    ! std::is_trivially_destructible< derived >::value >::type
+( erasure_special< derived >::* erasure_destroy () ) ()
+    { return & derived::erasure_special::destroy; }
+template< typename derived >
+constexpr typename std::enable_if<
+    std::is_trivially_destructible< derived >::value >::type
+( erasure_special< derived >::* erasure_destroy () ) ()
+    { return nullptr; }
+
+template< typename derived >
+constexpr typename std::enable_if<
+    ! std::is_trivially_constructible< derived, derived >::value >::type
+( erasure_special< derived >::* erasure_move () ) ( void * ) &&
+    { return & derived::erasure_special::copy; }
+template< typename derived >
+constexpr typename std::enable_if<
+    std::is_trivially_constructible< derived, derived >::value >::type
+( erasure_special< derived >::* erasure_move () ) ( void * ) &&
+    { return nullptr; }
+
+template< typename derived >
+constexpr typename std::enable_if<
+    std::is_copy_constructible< derived >::value
+    && ! std::is_trivially_copy_constructible< derived >::value >::type
 ( erasure_special< derived >::* erasure_copy () ) ( void * ) const &
     { return & derived::erasure_special::copy; }
 template< typename derived >
-constexpr typename std::enable_if< ! std::is_copy_constructible< derived >::value >::type
+constexpr typename std::enable_if<
+    ! std::is_copy_constructible< derived >::value
+    || std::is_trivially_copy_constructible< derived >::value >::type
 ( erasure_special< derived >::* erasure_copy () ) ( void * ) const &
     { return nullptr; }
 
@@ -127,8 +153,8 @@ t base::* ptm_cast( t actual_base::* ptm )
 #define DISPATCH_TABLE( NAME, TARGET_TYPE, TPARAM, TARG ) \
 template< UNPACK TPARAM > \
 typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::table = { \
-    ptm_cast< erasure_base< sig ... >, NAME >( & NAME::destroy ), \
-    ptm_cast< erasure_base< sig ... >, NAME >( & NAME::move ), \
+    ptm_cast< erasure_base< sig ... >, NAME >( erasure_destroy< NAME >() ), \
+    ptm_cast< erasure_base< sig ... >, NAME >( erasure_move< NAME >() ), \
     ptm_cast< erasure_base< sig ... >, NAME >( erasure_copy< NAME >() ), \
     ptm_cast< erasure_base< sig ... >, NAME >( & NAME::target_access ), \
     typeid (TARGET_TYPE), \
@@ -218,9 +244,9 @@ DISPATCH_TABLE( ptm_erasure, target_type, ( typename target_type, typename ... s
 
 DISPATCH_BASE_CASE( allocator )
 #define ALLOCATOR_CASE( QUALS, UNSAFE ) DISPATCH_CASE( QUALS, IGNORE, allocator, ( \
-    return static_cast< typename add_reference< decltype (derived::target) QUALS >::type >( * \
+    return ( * static_cast< typename add_reference< decltype (std::declval< derived >().target) QUALS >::type >( \
             static_cast< typename add_reference< derived QUALS >::type >( * this ) \
-        .target )( std::forward< args >( a ) ... ); \
+        .target ) )( std::forward< args >( a ) ... ); \
 ) )
 DISPATCH_ALL( ALLOCATOR_CASE )
 #undef ALLOCATOR_CASE
@@ -369,10 +395,12 @@ protected:
     // These functions enter or recover from invalid states.
     // They get on the right side of [basic.life]/7.4, but mind the exceptions.
     
-    void destroy() noexcept
-        { ( erasure() .* std::get< + dispatch_slot::destructor >( erasure().table ) )(); }
+    void destroy() noexcept {
+        auto nontrivial = std::get< + dispatch_slot::destructor >( erasure().table );
+        if ( nontrivial ) ( erasure() .* nontrivial )();
+    }
     
-    // Default, move, and copy.
+    // Default, move, and copy construction.
     void init( any_piecewise_construct_tag< std::nullptr_t >, std::nullptr_t ) noexcept
         { new (storage_address()) null_erasure< sig ... >; }
     
@@ -380,7 +408,9 @@ protected:
     typename std::enable_if< is_compatibly_wrapped< source >::value >::type
     init( any_piecewise_construct_tag< source >, source && s ) noexcept {
         wrapper_base & o = s;
-        ( std::move( o ).erasure() .* std::get< + dispatch_slot::move_constructor >( o.erasure().table ) )( storage_address() );
+        auto nontrivial = std::get< + dispatch_slot::move_constructor >( o.erasure().table );
+        if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
+        else ( std::move( o ).erasure() .* nontrivial )( storage_address() );
         o.destroy();
         o.init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr );
     }
@@ -388,7 +418,9 @@ protected:
     typename std::enable_if< is_compatibly_wrapped< source >::value >::type
     init( any_piecewise_construct_tag< source >, source const & s ) {
         wrapper_base const & o = s;
-        ( o.erasure() .* std::get< + dispatch_slot::copy_constructor >( o.erasure().table ) )( storage_address() );
+        auto nontrivial = std::get< + dispatch_slot::copy_constructor >( o.erasure().table );
+        if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
+        else ( o.erasure() .* nontrivial )( storage_address() );
     }
     
     // Local erasures.
@@ -598,6 +630,7 @@ public:
 template< typename ... sig >
 class function
     : impl::wrapper< impl::is_copyable_all_callable< sig ... >::template temp, sig ... > {
+    friend class impl::wrapper_base< sig ... >;
 public:
     using function::wrapper::wrapper;
     
@@ -612,6 +645,7 @@ public:
 template< typename ... sig >
 class unique_function
     : impl::wrapper< impl::is_all_callable< sig ... >::template temp, sig ... > {
+    friend class impl::wrapper_base< sig ... >;
 public:
     using unique_function::wrapper::wrapper;
     
