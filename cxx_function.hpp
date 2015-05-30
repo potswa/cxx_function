@@ -467,15 +467,73 @@ public:
     ~ wrapper_base() noexcept
         { destroy(); }
     
-    template< typename source >
-    wrapper_base & operator = ( source && s )
-        noexcept( is_compatibly_wrapped< source >::value || is_small< source >::value )
+    template< typename source,
+        typename = typename enable_if_all<
+            is_callable< typename std::decay< source >::type, sig >::value ...,
+            std::is_constructible< typename std::decay< source >::type, source >::value
+        >::type >
+    wrapper_base &
+    operator = ( source && s )
+    noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value || is_compatibly_wrapped< source >::value )
     try {
         destroy();
-        init( std::forward< source >( s ) );
+        init( any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) );
         return * this;
     } catch (...) {
-        init();
+        init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr );
+        throw;
+    }
+    
+    template< typename allocator, typename source,
+        typename = typename enable_if_all<
+            is_callable< typename std::decay< source >::type, sig >::value ...,
+            std::is_constructible< typename std::decay< source >::type, source >::value
+        >::type >
+    wrapper_base &
+    assign( source && s, allocator const & alloc )
+    noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value || is_compatibly_wrapped< source >::value )
+    try {
+        destroy();
+        init( std::allocator_arg, alloc, any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< source >( s ) );
+        return * this;
+    } catch (...) {
+        init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr );
+        throw;
+    }
+    
+    template< typename source, typename ... arg,
+        typename = typename enable_if_all<
+            is_callable< source, sig >::value ...,
+            std::is_constructible< source, arg ... >::value
+        >::type >
+    wrapper_base &
+    emplace_assign( arg && ... a )
+    noexcept( is_noexcept_erasable< source >::value
+        || ( is_compatibly_wrapped< source >::value && std::is_nothrow_constructible< source, arg ... >::value ) )
+    try {
+        destroy();
+        init( any_piecewise_construct_tag< source >{}, std::forward< arg >( a ) ... );
+        return * this;
+    } catch (...) {
+        init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr );
+        throw;
+    }
+    
+    template< typename source, typename allocator, typename ... arg,
+        typename = typename enable_if_all<
+            is_callable< source, sig >::value ...,
+            std::is_constructible< source, arg ... >::value
+        >::type >
+    wrapper_base &
+    allocate_assign( allocator const & alloc, arg && ... a )
+    noexcept( is_noexcept_erasable< source >::value
+        || ( is_compatibly_wrapped< source >::value && std::is_nothrow_constructible< source, arg ... >::value ) )
+    try {
+        destroy();
+        init( std::allocator_arg, alloc, any_piecewise_construct_tag< typename std::decay< source >::type >{}, std::forward< arg >( a ) ... );
+        return * this;
+    } catch (...) {
+        init( any_piecewise_construct_tag< std::nullptr_t >{}, nullptr );
         throw;
     }
     
