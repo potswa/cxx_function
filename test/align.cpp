@@ -11,7 +11,7 @@ struct alignas(32) x {
 };
 
 int main() {
-    cxx_function::function< void() > q = { cxx_function::any_piecewise_construct_tag< x >{} }, r = std::move( q );
+    cxx_function::function< void() > q = { cxx_function::in_place_t< x >{} }, r = std::move( q );
     static_assert ( alignof (x) > alignof (decltype (q)), "test defeated" );
     assert ( ! did_move );
 }

@@ -21,10 +21,11 @@ static_assert ( std::is_nothrow_constructible< function< int( int ) >, function<
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, function< int( int ) & > >::value, "" );
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, function< int( int ) const & > >::value, "" );
 
-static_assert ( std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>, any_piecewise_construct_tag< std::nullptr_t >, std::nullptr_t >::value, "" );
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
-    any_piecewise_construct_tag< function< int( int ) > >, std::nullptr_t >::value, "" );
+    in_place_t< std::nullptr_t >, std::nullptr_t >::value, "" );
+static_assert ( std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
+    in_place_t< function< int( int ) > >, std::nullptr_t >::value, "" );
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
-    any_piecewise_construct_tag< function< int( int ) > >, f >::value, "" );
+    in_place_t< function< int( int ) > >, f >::value, "" );
 
 int main () {}
