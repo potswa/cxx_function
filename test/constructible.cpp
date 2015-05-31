@@ -1,5 +1,3 @@
-#include <iostream>
-
 #include "cxx_function.hpp"
 #include <type_traits>
 #include <cassert>
@@ -10,6 +8,8 @@ struct f {
     int operator () ( int ) & { return 0; }
 };
 
+static_assert ( std::is_default_constructible< function< int( int ) > >::value, "" );
+static_assert ( std::is_default_constructible< unique_function< int( int ) > >::value, "" );
 
 static_assert ( std::is_convertible< f, function< int( int ) > >::value, "" );
 static_assert ( std::is_convertible< f, function< int( std::integral_constant< long, 100 > ) > >::value, "" );
@@ -27,5 +27,24 @@ static_assert ( std::is_nothrow_constructible< function< int( int ) >, std::allo
     in_place_t< function< int( int ) > >, std::nullptr_t >::value, "" );
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
     in_place_t< function< int( int ) > >, f >::value, "" );
+
+typedef unique_function< int( int ) & > uft;
+static_assert ( std::is_assignable< uft, uft >::value, "" );
+static_assert ( std::is_assignable< uft, uft && >::value, "" );
+static_assert ( ! std::is_assignable< uft, uft & >::value, "" );
+static_assert ( ! std::is_assignable< uft, uft const & >::value, "" );
+static_assert ( ! std::is_assignable< uft, uft const && >::value, "" );
+
+typedef function< int( int ) & > ft;
+static_assert ( std::is_assignable< ft, ft >::value, "" );
+static_assert ( std::is_assignable< ft, ft && >::value, "" );
+static_assert ( std::is_assignable< ft, ft & >::value, "" );
+static_assert ( std::is_assignable< ft, ft const & >::value, "" );
+static_assert ( std::is_assignable< ft, ft const && >::value, "" );
+
+static_assert ( ! std::is_constructible< function< int( int ) & >, std::allocator_arg_t, std::allocator< uft >, uft >::value, "" );
+static_assert ( ! std::is_constructible< function< int( int ) & >, std::allocator_arg_t, std::allocator< uft >, uft & >::value, "" );
+
+uft a, q( std::allocator_arg, std::allocator< uft >{}, a ); // "Allocator construction request bypassed unique_function copyability."
 
 int main () {}

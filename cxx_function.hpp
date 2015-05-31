@@ -334,12 +334,15 @@ struct is_all_callable {
     using temp = typename logical_intersection< is_callable< t, sig >::value ... >::type;
 };
 
-template< typename ... sig >
+template< typename self, typename ... sig >
 struct is_copyable_all_callable {
-    template< typename t >
+    template< typename t, typename = void >
     struct temp : std::integral_constant< bool,
         std::is_copy_constructible< t >::value
         && is_all_callable< sig ... >::template temp< t >::value > {};
+    
+    template< typename v > // Presume that self is a copyable wrapper, since that is what uses this metafunction.
+    struct temp< self, v > : std::true_type {};
 };
 
 template< typename source >
@@ -422,6 +425,7 @@ protected:
     template< typename source >
     typename std::enable_if< is_compatibly_wrapped< source >::value >::type
     init( in_place_t< source >, source const & s ) {
+        static_assert ( std::is_copy_constructible< source >::value, "Allocator construction request bypassed unique_function copyability." );
         wrapper_base const & o = s;
         auto nontrivial = std::get< + dispatch_slot::copy_constructor >( o.erasure().table );
         if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
@@ -488,7 +492,7 @@ public:
         { return target_type() != typeid (void); }
 };
 
-template< template< typename > class in_is_targetable, typename ... sig >
+template< template< typename ... > class is_targetable, typename ... sig >
 class wrapper
     : wrapper_base< sig ... > {
     friend class wrapper_base< sig ... >;
@@ -497,11 +501,6 @@ class wrapper
     using wrapper::wrapper_base::destroy;
     template< typename t >
     using is_compatibly_wrapped = typename wrapper::wrapper_base::template is_compatibly_wrapped< t >;
-    
-    template< typename t, typename = void > // Avoid recursive (and pointless) queries.
-    struct is_targetable : in_is_targetable< t > {};
-    template< typename t >
-    struct is_targetable< t, typename std::enable_if< is_compatibly_wrapped< t >::value >::type > : std::true_type {};
 public:
     using wrapper::wrapper_base::operator ();
     using wrapper::wrapper_base::target;
@@ -516,18 +515,25 @@ public:
         { init( in_place_t< wrapper >{}, s ); }
     
     template< typename source,
-        typename = typename std::enable_if<
+        typename std::enable_if<
             is_targetable< typename std::decay< source >::type >::value
             && std::is_constructible< typename std::decay< source >::type, source >::value
-        >::type >
+        >::type * = nullptr >
     wrapper( source && s )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value || is_compatibly_wrapped< source >::value )
         { init( in_place_t< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
+
+    // Prevent slicing fallback to copy/move constructor.
+    template< typename source,
+        typename std::enable_if<
+            ! is_targetable< typename std::decay< source >::type >::value
+            || ! std::is_constructible< typename std::decay< source >::type, source >::value
+        >::type * = nullptr >
+    wrapper( source && s ) = delete;
     
     template< typename allocator, typename source,
         typename = typename std::enable_if<
             is_targetable< typename std::decay< source >::type >::value
-            && std::is_constructible< typename std::decay< source >::type, source >::value
         >::type >
     wrapper( std::allocator_arg_t, allocator const & alloc, source && s )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value || is_compatibly_wrapped< source >::value )
@@ -546,7 +552,6 @@ public:
     template< typename allocator, typename source, typename ... arg,
         typename = typename std::enable_if<
             is_targetable< source >::value
-            && std::is_constructible< source, arg ... >::value
         >::type >
     wrapper( std::allocator_arg_t, allocator const & alloc, in_place_t< source > t, arg && ... a )
     noexcept( is_noexcept_erasable< source >::value
@@ -576,7 +581,6 @@ public:
     template< typename allocator, typename source,
         typename = typename std::enable_if<
             is_targetable< typename std::decay< source >::type >::value
-            && std::is_constructible< typename std::decay< source >::type, source >::value
         >::type >
     wrapper &
     assign( source && s, allocator const & alloc )
@@ -611,7 +615,6 @@ public:
     template< typename source, typename allocator, typename ... arg,
         typename = typename std::enable_if<
             is_targetable< source >::value
-            && std::is_constructible< source, arg ... >::value
         >::type >
     wrapper &
     allocate_assign( allocator const & alloc, arg && ... a )
@@ -634,35 +637,19 @@ public:
 
 template< typename ... sig >
 class function
-    : impl::wrapper< impl::is_copyable_all_callable< sig ... >::template temp, sig ... > {
+    : impl::wrapper< impl::is_copyable_all_callable< function< sig ... >, sig ... >::template temp, sig ... > {
     friend class impl::wrapper_base< sig ... >;
 public:
     using function::wrapper::wrapper;
     
     using function::wrapper::operator ();
     using function::wrapper::operator =;
+    function & operator = ( function const & o ) // Investigate why this is needed. Compiler bug?
+        { return static_cast< typename function::wrapper & >( * this ) = o; }
     using function::wrapper::swap;
     using function::wrapper::target;
     using function::wrapper::target_type;
     using function::wrapper::operator bool;
-};
-
-template< typename ... sig >
-class unique_function
-    : impl::wrapper< impl::is_all_callable< sig ... >::template temp, sig ... > {
-    friend class impl::wrapper_base< sig ... >;
-public:
-    using unique_function::wrapper::wrapper;
-    
-    unique_function( unique_function && ) = default;
-    unique_function( unique_function const & ) = delete;
-    
-    using unique_function::wrapper::operator ();
-    using unique_function::wrapper::operator =;
-    using unique_function::wrapper::swap;
-    using unique_function::wrapper::target;
-    using unique_function::wrapper::target_type;
-    using unique_function::wrapper::operator bool;
 };
 
 template< typename ... sig >
@@ -676,6 +663,38 @@ bool operator == ( std::nullptr_t, function< sig ... > const & a )
     { return !a; }
 template< typename ... sig >
 bool operator != ( std::nullptr_t, function< sig ... > const & a )
+    { return a; }
+
+template< typename ... sig >
+class unique_function
+    : impl::wrapper< impl::is_all_callable< sig ... >::template temp, sig ... > {
+    friend class impl::wrapper_base< sig ... >;
+public:
+    using unique_function::wrapper::wrapper;
+    
+    unique_function() = default;
+    unique_function( unique_function && ) = default;
+    unique_function( unique_function const & ) = delete;
+    
+    using unique_function::wrapper::operator ();
+    using unique_function::wrapper::operator =;
+    using unique_function::wrapper::swap;
+    using unique_function::wrapper::target;
+    using unique_function::wrapper::target_type;
+    using unique_function::wrapper::operator bool;
+};
+
+template< typename ... sig >
+bool operator == ( unique_function< sig ... > const & a, std::nullptr_t )
+    { return !a; }
+template< typename ... sig >
+bool operator != ( unique_function< sig ... > const & a, std::nullptr_t )
+    { return a; }
+template< typename ... sig >
+bool operator == ( std::nullptr_t, unique_function< sig ... > const & a )
+    { return !a; }
+template< typename ... sig >
+bool operator != ( std::nullptr_t, unique_function< sig ... > const & a )
     { return a; }
 
 }
