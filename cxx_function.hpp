@@ -654,19 +654,6 @@ public:
 };
 
 template< typename ... sig >
-bool operator == ( function< sig ... > const & a, std::nullptr_t )
-    { return !a; }
-template< typename ... sig >
-bool operator != ( function< sig ... > const & a, std::nullptr_t )
-    { return a; }
-template< typename ... sig >
-bool operator == ( std::nullptr_t, function< sig ... > const & a )
-    { return !a; }
-template< typename ... sig >
-bool operator != ( std::nullptr_t, function< sig ... > const & a )
-    { return a; }
-
-template< typename ... sig >
 class unique_function
     : impl::wrapper< impl::is_all_callable< sig ... >::template temp, sig ... > {
     friend class impl::wrapper_base< sig ... >;
@@ -685,18 +672,22 @@ public:
     using unique_function::wrapper::operator bool;
 };
 
-template< typename ... sig >
-bool operator == ( unique_function< sig ... > const & a, std::nullptr_t )
-    { return !a; }
-template< typename ... sig >
-bool operator != ( unique_function< sig ... > const & a, std::nullptr_t )
+#define DEFINE_WRAPPER_OPS( NAME ) \
+template< typename ... sig > \
+bool operator == ( NAME< sig ... > const & a, std::nullptr_t ) \
+    { return !a; } \
+template< typename ... sig > \
+bool operator != ( NAME< sig ... > const & a, std::nullptr_t ) \
+    { return a; } \
+template< typename ... sig > \
+bool operator == ( std::nullptr_t, NAME< sig ... > const & a ) \
+    { return !a; } \
+template< typename ... sig > \
+bool operator != ( std::nullptr_t, NAME< sig ... > const & a ) \
     { return a; }
-template< typename ... sig >
-bool operator == ( std::nullptr_t, unique_function< sig ... > const & a )
-    { return !a; }
-template< typename ... sig >
-bool operator != ( std::nullptr_t, unique_function< sig ... > const & a )
-    { return a; }
+
+DEFINE_WRAPPER_OPS( function )
+DEFINE_WRAPPER_OPS( unique_function )
 
 }
 
