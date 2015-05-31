@@ -380,7 +380,8 @@ struct wrapper_dispatch< derived, n, const_unsafe_case< ret( args ... ) >, more 
 template< typename ... sig >
 class wrapper_base
     : public wrapper_dispatch< wrapper_base< sig ... >, 0, sig ... > {
-    std::aligned_storage< sizeof (void *[4]) >::type storage;
+    typedef std::aligned_storage< sizeof (void *[3]) >::type effective_storage_type;
+    std::aligned_storage< sizeof (void *[4]), alignof(effective_storage_type) >::type storage;
     void * storage_address() { return & storage; }
     
     // Queries on potential targets.
