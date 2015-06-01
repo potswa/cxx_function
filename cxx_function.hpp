@@ -49,6 +49,11 @@ enum class dispatch_slot {
     target_access,
     target_type,
     
+    allocator_type,
+    allocator_equal,
+    allocator_move,
+    allocator_copy,
+    
     base_index
 };
 constexpr int operator + ( dispatch_slot e ) { return static_cast< int >( e ); }
@@ -64,6 +69,11 @@ struct erasure_base {
         
         void const * (erasure_base::*)() const, // target access
         std::type_info const &, // target_type
+        
+        std::type_info const *, // allocator_type
+        bool (erasure_base::*)( void const * alloc ) const, // allocator equal
+        void (erasure_base::*)( void * dest, void const * alloc ) &&, // allocator move
+        void (erasure_base::*)( void * dest, void const * alloc ) const &, // allocator copy
         
         sig erasure_base::* ... // dispatchers
     > dispatch_table;
@@ -89,37 +99,84 @@ struct erasure_special {
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_destructible< derived >::value >::type
-( erasure_special< derived >::* erasure_destroy () ) ()
+( erasure_special< derived >::* erasure_destroy() ) ()
     { return & derived::erasure_special::destroy; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_destructible< derived >::value >::type
-( erasure_special< derived >::* erasure_destroy () ) ()
+( erasure_special< derived >::* erasure_destroy() ) ()
     { return nullptr; }
 
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_constructible< derived, derived >::value >::type
-( erasure_special< derived >::* erasure_move () ) ( void * ) &&
+( erasure_special< derived >::* erasure_move() ) ( void * ) &&
     { return & derived::erasure_special::move; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_constructible< derived, derived >::value >::type
-( erasure_special< derived >::* erasure_move () ) ( void * ) &&
+( erasure_special< derived >::* erasure_move() ) ( void * ) &&
     { return nullptr; }
 
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_copy_constructible< derived >::value
     && ! std::is_trivially_copy_constructible< derived >::value >::type
-( erasure_special< derived >::* erasure_copy () ) ( void * ) const &
+( erasure_special< derived >::* erasure_copy() ) ( void * ) const &
     { return & derived::erasure_special::copy; }
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_copy_constructible< derived >::value
     || std::is_trivially_copy_constructible< derived >::value >::type
-( erasure_special< derived >::* erasure_copy () ) ( void * ) const &
+( erasure_special< derived >::* erasure_copy() ) ( void * ) const &
     { return nullptr; }
+
+template< typename, typename = void >
+struct is_allocator_erasure : std::false_type {};
+template< typename erasure >
+struct is_allocator_erasure< erasure, typename std::allocator_traits< typename erasure::void_alloc >::value_type >
+    : std::true_type {};
+
+template< typename derived >
+constexpr typename std::enable_if< is_allocator_erasure< derived >::value,
+std::type_info const * >::type erasure_allocator_type()
+    { return & typeid (typename derived::void_alloc); }
+
+template< typename derived >
+constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value,
+std::type_info const * >::type erasure_allocator_type()
+    { return nullptr; }
+
+template< typename derived >
+constexpr typename std::enable_if< is_allocator_erasure< derived >::value,
+bool >::type ( derived::* erasure_allocator_equal() ) ( void const * ) const
+    { return & derived::allocator_equal; }
+
+template< typename derived >
+constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value,
+bool >::type ( derived::* erasure_allocator_equal() ) ( void const * ) const
+    { return nullptr; }
+
+template< typename derived >
+constexpr typename std::enable_if< is_allocator_erasure< derived >::value >::type
+( derived::* erasure_allocator_move() ) ( void *, void const * ) &&
+    { return & derived::allocator_move; }
+
+template< typename derived >
+constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value >::type
+( derived::* erasure_allocator_move() ) ( void *, void const * ) &&
+    { return nullptr; }
+
+template< typename derived >
+constexpr typename std::enable_if< is_allocator_erasure< derived >::value >::type
+( derived::* erasure_allocator_copy() ) ( void *, void const * ) const &
+    { return & derived::allocator_copy; }
+
+template< typename derived >
+constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value >::type
+( derived::* erasure_allocator_copy() ) ( void *, void const * ) const &
+    { return nullptr; }
+
 
 template< typename >
 struct const_unsafe_case;
@@ -163,6 +220,10 @@ typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::tabl
     ptm_cast< erasure_base< sig ... >, NAME >( erasure_copy< NAME >() ), \
     ptm_cast< erasure_base< sig ... >, NAME >( & NAME::target_access ), \
     typeid (TARGET_TYPE), \
+    erasure_allocator_type< NAME >(), \
+    ptm_cast< erasure_base< sig ... >, NAME >( erasure_allocator_equal< NAME >() ), \
+    ptm_cast< erasure_base< sig ... >, NAME >( erasure_allocator_move< NAME >() ), \
+    ptm_cast< erasure_base< sig ... >, NAME >( erasure_allocator_copy< NAME >() ), \
     ptm_cast< erasure_base< sig ... >, NAME >( static_cast< sig NAME::* >( & NAME::operator () ) ) ... \
 };
 
@@ -263,25 +324,35 @@ struct allocator_erasure
     , erasure_special< allocator_erasure< allocator, target_type, sig ... > >
     , allocator_dispatch< allocator_erasure< allocator, target_type, sig ... >, 0, sig ... > {
     using allocator_erasure::erasure_special::destroy;
+    typedef std::allocator_traits< allocator > allocator_traits;
+    typedef typename allocator_traits::template rebind_alloc< void > void_allocator;
+    
     static const typename erasure_base< sig ... >::dispatch_table table;
     
-    typename std::allocator_traits< allocator >::pointer target;
+    typename allocator_traits::pointer target;
     
     allocator & alloc() { return static_cast< allocator & >( * this ); }
     target_type * target_address() { return std::addressof( * target ); }
     void const * target_access() const { return std::addressof( * target ); }
     
+    bool allocator_equal( void const * rhs ) const
+        { return alloc() == * static_cast< void_allocator const * >( rhs ); }
+    void allocator_move( void * dest, void const * new_alloc ) &&
+        { new (dest) allocator_erasure( * static_cast< void_allocator const * >( new_alloc ), std::move( * target ) ); }
+    void allocator_copy( void * dest, void const * new_alloc ) const &
+        { new (dest) allocator_erasure( * static_cast< void_allocator const * >( new_alloc ), * target ); }
+    
     template< typename ... arg >
-    allocator_erasure( allocator in_alloc, arg && ... a )
+    allocator_erasure( allocator const & in_alloc, arg && ... a )
         : allocator_erasure::erasure_base( table )
         , allocator( in_alloc )
-        , target( std::allocator_traits< allocator >::allocate( alloc(), 1 ) )
-        { std::allocator_traits< allocator >::construct( alloc(), target_address(), std::forward< arg >( a ) ... ); }
+        , target( allocator_traits::allocate( alloc(), 1 ) )
+        { allocator_traits::construct( alloc(), target_address(), std::forward< arg >( a ) ... ); }
     
     ~ allocator_erasure() {
         if ( target ) {
-            std::allocator_traits< allocator >::destroy( alloc(), target_address() );
-            std::allocator_traits< allocator >::deallocate( alloc(), target, 1 );
+            allocator_traits::destroy( alloc(), target_address() );
+            allocator_traits::deallocate( alloc(), target, 1 );
         }
     }
     allocator_erasure( allocator_erasure && o ) noexcept
@@ -293,8 +364,8 @@ struct allocator_erasure
     allocator_erasure( allocator_erasure const & o )
         : allocator_erasure::erasure_base( table )
         , allocator( o )
-        , target( std::allocator_traits< allocator >::allocate( alloc(), 1 ) )
-        { std::allocator_traits< allocator >::construct( alloc(), target_address(), * o.target ); }
+        , target( allocator_traits::allocate( alloc(), 1 ) )
+        { allocator_traits::construct( alloc(), target_address(), * o.target ); }
 };
 
 DISPATCH_TABLE( allocator_erasure, target_type, ( typename allocator, typename target_type, typename ... sig ), ( allocator, target_type, sig ... ) )
