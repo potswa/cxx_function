@@ -48,11 +48,7 @@ enum class dispatch_slot {
     copy_constructor,
     target_access,
     target_type,
-    
     allocator_type,
-    allocator_equal,
-    allocator_move,
-    allocator_copy,
     
     base_index
 };
@@ -69,11 +65,7 @@ struct erasure_base {
         
         void const * (erasure_base::*)() const, // target access
         std::type_info const &, // target_type
-        
         std::type_info const *, // allocator_type
-        bool (erasure_base::*)( void const * alloc ) const, // allocator equal
-        void (erasure_base::*)( void * dest, void const * alloc ) &&, // allocator move
-        void (erasure_base::*)( void * dest, void const * alloc ) const &, // allocator copy
         
         sig erasure_base::* ... // dispatchers
     > dispatch_table;
@@ -147,36 +139,6 @@ constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value,
 std::type_info const * >::type erasure_allocator_type()
     { return nullptr; }
 
-template< typename derived >
-constexpr typename std::enable_if< is_allocator_erasure< derived >::value,
-bool >::type ( derived::* erasure_allocator_equal() ) ( void const * ) const
-    { return & derived::allocator_equal; }
-
-template< typename derived >
-constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value,
-bool >::type ( derived::* erasure_allocator_equal() ) ( void const * ) const
-    { return nullptr; }
-
-template< typename derived >
-constexpr typename std::enable_if< is_allocator_erasure< derived >::value >::type
-( derived::* erasure_allocator_move() ) ( void *, void const * ) &&
-    { return & derived::allocator_move; }
-
-template< typename derived >
-constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value >::type
-( derived::* erasure_allocator_move() ) ( void *, void const * ) &&
-    { return nullptr; }
-
-template< typename derived >
-constexpr typename std::enable_if< is_allocator_erasure< derived >::value >::type
-( derived::* erasure_allocator_copy() ) ( void *, void const * ) const &
-    { return & derived::allocator_copy; }
-
-template< typename derived >
-constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value >::type
-( derived::* erasure_allocator_copy() ) ( void *, void const * ) const &
-    { return nullptr; }
-
 
 template< typename >
 struct const_unsafe_case;
@@ -221,9 +183,6 @@ typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::tabl
     ptm_cast< erasure_base< sig ... >, NAME >( & NAME::target_access ), \
     typeid (TARGET_TYPE), \
     erasure_allocator_type< NAME >(), \
-    ptm_cast< erasure_base< sig ... >, NAME >( erasure_allocator_equal< NAME >() ), \
-    ptm_cast< erasure_base< sig ... >, NAME >( erasure_allocator_move< NAME >() ), \
-    ptm_cast< erasure_base< sig ... >, NAME >( erasure_allocator_copy< NAME >() ), \
     ptm_cast< erasure_base< sig ... >, NAME >( static_cast< sig NAME::* >( & NAME::operator () ) ) ... \
 };
 
