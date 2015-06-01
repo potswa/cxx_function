@@ -60,8 +60,8 @@ template< typename ... sig >
 struct erasure_base {
     typedef std::tuple<
         void (erasure_base::*)(), // destructor
-        void (erasure_base::*)( void * ) &&, // move constructor
-        void (erasure_base::*)( void * ) const &, // copy constructor
+        void (erasure_base::*)( void * dest, void const * alloc ) &&, // move constructor
+        void (erasure_base::*)( void * dest, void const * alloc ) const &, // copy constructor
         
         void const * (erasure_base::*)() const, // target access
         std::type_info const &, // target_type
@@ -81,9 +81,9 @@ template< typename derived >
 struct erasure_special {
     void destroy()
         { static_cast< derived * >( this )-> ~ derived(); }
-    void move( void * dest ) &&
+    void move( void * dest, void const * ) &&
         { new (dest) derived( std::move( * static_cast< derived * >( this ) ) ); }
-    void copy( void * dest ) const &
+    void copy( void * dest, void const * ) const &
         { new (dest) derived( * static_cast< derived const * >( this ) ); }
 };
 
@@ -91,36 +91,36 @@ struct erasure_special {
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_destructible< derived >::value >::type
-( erasure_special< derived >::* erasure_destroy() ) ()
-    { return & derived::erasure_special::destroy; }
+( derived::* erasure_destroy() ) ()
+    { return & derived::destroy; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_destructible< derived >::value >::type
-( erasure_special< derived >::* erasure_destroy() ) ()
+( derived::* erasure_destroy() ) ()
     { return nullptr; }
 
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_constructible< derived, derived >::value >::type
-( erasure_special< derived >::* erasure_move() ) ( void * ) &&
-    { return & derived::erasure_special::move; }
+( derived::* erasure_move() ) ( void *, void const * ) &&
+    { return & derived::move; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_constructible< derived, derived >::value >::type
-( erasure_special< derived >::* erasure_move() ) ( void * ) &&
+( derived::* erasure_move() ) ( void *, void const * ) &&
     { return nullptr; }
 
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_copy_constructible< derived >::value
     && ! std::is_trivially_copy_constructible< derived >::value >::type
-( erasure_special< derived >::* erasure_copy() ) ( void * ) const &
-    { return & derived::erasure_special::copy; }
+( derived::* erasure_copy() ) ( void *, void const * ) const &
+    { return & derived::copy; }
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_copy_constructible< derived >::value
     || std::is_trivially_copy_constructible< derived >::value >::type
-( erasure_special< derived >::* erasure_copy() ) ( void * ) const &
+( derived::* erasure_copy() ) ( void *, void const * ) const &
     { return nullptr; }
 
 template< typename, typename = void >
@@ -294,13 +294,6 @@ struct allocator_erasure
     target_type * target_address() { return std::addressof( * target ); }
     void const * target_access() const { return std::addressof( * target ); }
     
-    bool allocator_equal( void const * rhs ) const
-        { return alloc() == * static_cast< void_allocator const * >( rhs ); }
-    void allocator_move( void * dest, void const * new_alloc ) &&
-        { new (dest) allocator_erasure( * static_cast< void_allocator const * >( new_alloc ), std::move( * target ) ); }
-    void allocator_copy( void * dest, void const * new_alloc ) const &
-        { new (dest) allocator_erasure( * static_cast< void_allocator const * >( new_alloc ), * target ); }
-    
     template< typename ... arg >
     allocator_erasure( allocator const & in_alloc, arg && ... a )
         : allocator_erasure::erasure_base( table )
@@ -449,7 +442,7 @@ protected:
         wrapper_base & o = s;
         auto nontrivial = std::get< + dispatch_slot::move_constructor >( o.erasure().table );
         if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
-        else ( std::move( o ).erasure() .* nontrivial )( storage_address() );
+        else ( std::move( o ).erasure() .* nontrivial )( storage_address(), nullptr );
         o.destroy();
         o.init( in_place_t< std::nullptr_t >{}, nullptr );
     }
@@ -460,7 +453,7 @@ protected:
         wrapper_base const & o = s;
         auto nontrivial = std::get< + dispatch_slot::copy_constructor >( o.erasure().table );
         if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
-        else ( o.erasure() .* nontrivial )( storage_address() );
+        else ( o.erasure() .* nontrivial )( storage_address(), nullptr );
     }
     
     // Local erasures.
