@@ -276,21 +276,25 @@ DISPATCH_BASE_CASE( allocator )
 DISPATCH_ALL( ALLOCATOR_CASE )
 #undef ALLOCATOR_CASE
 
+template< typename derived, typename = void >
+struct allocator_erasure_special
+    : erasure_special< derived > {};
+
 template< typename allocator, typename target_type, typename ... sig >
 struct allocator_erasure
     : erasure_base< sig ... >
     , allocator
-    , erasure_special< allocator_erasure< allocator, target_type, sig ... > >
+    , allocator_erasure_special< allocator_erasure< allocator, target_type, sig ... > >
     , allocator_dispatch< allocator_erasure< allocator, target_type, sig ... >, 0, sig ... > {
-    using allocator_erasure::erasure_special::destroy;
+    using allocator_erasure::allocator_erasure_special::destroy;
     typedef std::allocator_traits< allocator > allocator_traits;
-    typedef typename allocator_traits::template rebind_alloc< void > void_allocator;
     
     static const typename erasure_base< sig ... >::dispatch_table table;
     
     typename allocator_traits::pointer target;
     
     allocator & alloc() { return static_cast< allocator & >( * this ); }
+    allocator const & alloc() const { return static_cast< allocator const & >( * this ); }
     target_type * target_address() { return std::addressof( * target ); }
     void const * target_access() const { return std::addressof( * target ); }
     
@@ -309,15 +313,47 @@ struct allocator_erasure
     }
     allocator_erasure( allocator_erasure && o ) noexcept
         : allocator_erasure::erasure_base( table )
-        , allocator( std::move( o ) )
+        , allocator( std::move( o.alloc() ) )
         , target( std::move( o.target ) )
         { o.target = nullptr; }
     
-    allocator_erasure( allocator_erasure const & o )
+    allocator_erasure( allocator_erasure && o, allocator const & dest_allocator )
         : allocator_erasure::erasure_base( table )
-        , allocator( o )
+        , allocator( dest_allocator )
+        , target( allocator_traits::allocate( alloc(), 1 ) )
+        { allocator_traits::construct( alloc(), target_address(), std::move( * o.target ) ); }
+    
+    allocator_erasure( allocator_erasure const & o )
+        : allocator_erasure( o, o.alloc() ) {}
+    
+    allocator_erasure( allocator_erasure const & o, allocator const & dest_allocator )
+        : allocator_erasure::erasure_base( table )
+        , allocator( dest_allocator )
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { allocator_traits::construct( alloc(), target_address(), * o.target ); }
+};
+
+template< typename allocator, typename target_type, typename ... sig >
+struct allocator_erasure_special< allocator_erasure< allocator, target_type, sig ... >,
+    typename std::enable_if< ! std::allocator_traits< allocator >::propagate_on_container_move_assignment
+        && ! std::allocator_traits< allocator >::is_always_equal >::type >
+    : erasure_special< allocator_erasure< allocator, target_type, sig ... > > {
+    typedef typename std::allocator_traits< allocator >::template rebind_alloc< void > void_allocator;
+    typedef allocator_erasure< allocator, target_type, sig ... > derived;
+    allocator const & alloc() const { return static_cast< derived const & >( * this ); }
+    
+    void move( void * dest, void const * dest_allocator_v ) && {
+        auto dest_allocator = static_cast< void_allocator const * >( dest_allocator_v );
+        if ( ! dest_allocator || * dest_allocator == alloc() ) {
+            new (dest) derived( std::move( * this ) );
+        } else {
+            new (dest) derived( std::move( * this ), * dest_allocator );
+        }
+    }
+    void copy( void * dest, void const * dest_allocator_v ) const & {
+        auto dest_allocator = static_cast< void_allocator const * >( dest_allocator_v );
+        new (dest) derived( * this, dest_allocator? static_cast< allocator const & >( * dest_allocator ) : alloc() );
+    }
 };
 
 DISPATCH_TABLE( allocator_erasure, target_type, ( typename allocator, typename target_type, typename ... sig ), ( allocator, target_type, sig ... ) )
