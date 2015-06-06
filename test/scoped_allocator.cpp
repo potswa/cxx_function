@@ -1,6 +1,7 @@
 #include "cxx_function.hpp"
 
 #include <cassert>
+#include <forward_list>
 #include <map>
 #include <scoped_allocator>
 #include <string>
@@ -58,8 +59,25 @@ struct stateful_op {
         { /* std::cout << "op says " << state << " from pool id " << state.get_allocator().id << '\n'; */ }
 };
 
+struct listful_op {
+    typedef std::scoped_allocator_adaptor< pool_alloc< pool_string > > state_alloc;
+    std::forward_list< pool_string, state_alloc > state;
+
+    listful_op( listful_op const & o, state_alloc a )
+        : state( o.state, a ) {}
+
+    explicit listful_op( pool_string s, state_alloc a )
+        : state( { std::move( s ) }, a ) {}
+
+    void operator () () const
+        { /* std::cout << "op says " << state << " from pool id " << state.get_allocator().id << '\n'; */ }
+};
+static_assert ( sizeof (std::forward_list< int >) < sizeof(void *[3]), "list is bigger than anticipated." );
+static_assert ( sizeof (listful_op) <= sizeof (void *[3]), "Small-size container test defeated." );
+
 namespace std {
     template< typename a > struct uses_allocator< stateful_op, a > : std::true_type {};
+    template< typename a > struct uses_allocator< listful_op, a > : std::true_type {};
 }
 
 using namespace cxx_function;
@@ -81,4 +99,10 @@ int main() {
     assert ( pool[ 0 ] == 32 ); // 32 bytes to store the 29-byte string
     assert ( pool[ 1 ] == 128 ); // 128 bytes for two 29-byte strings + two stateful_ops
     assert ( pool[ 2 ] == 64 ); // 64 bytes for one 29-byte string + one stateful_op
+    
+    fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
+    fc1 = fc2;
+    fv = nullptr;
+    
+    assert ( pool[ 1 ] == pool[ 2 ] );
 }
