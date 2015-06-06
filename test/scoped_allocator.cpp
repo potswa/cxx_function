@@ -92,8 +92,6 @@ int main() {
     fct fc2( std::allocator_arg, pool_alloc< char >{ 2 } );
     fc2 = fv;
     
-    fct fc3( fv );
-    
     op();
     fc1();
     fc2();
