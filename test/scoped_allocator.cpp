@@ -84,12 +84,15 @@ using namespace cxx_function;
 
 int main() {
     stateful_op op( { "hello from a very long string", pool_alloc< char >{ 0 } } );
-
-    function_container< std::scoped_allocator_adaptor< pool_alloc<char> >, void() > fc1( std::allocator_arg, pool_alloc< char >{ 1 } );
+    
+    typedef function_container< std::scoped_allocator_adaptor< pool_alloc<char> >, void() > fct;
+    fct fc1( std::allocator_arg, pool_alloc< char >{ 1 } );
     fc1 = op;
     function< void() > fv = fc1;
-    function_container< std::scoped_allocator_adaptor< pool_alloc<char> >, void() > fc2( std::allocator_arg, pool_alloc< char >{ 2 } );
+    fct fc2( std::allocator_arg, pool_alloc< char >{ 2 } );
     fc2 = fv;
+    
+    fct fc3( fv );
     
     op();
     fc1();

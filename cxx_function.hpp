@@ -700,6 +700,7 @@ class wrapper
     
     template< typename compatible >
     wrapper & finish_assign ( compatible && next ) noexcept {
+        static_assert ( is_compatibly_wrapped< typename std::decay< compatible >::type >::value, "Assignment exception safety violation." );
         destroy();
         init( in_place_t< compatible >{}, std::move( next ) );
         //this->actual_allocator() = next.actual_allocator(); -- would be nice to update local allocator state, but can't really keep it consistent.
