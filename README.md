@@ -31,7 +31,7 @@ Highlights
 
  - Custom `construct()` and `destroy()`
  - `std::scoped_allocator_adaptor` reaches inside target objects
- - Allocator propagation by assignment, swap, and copying (mostly complete, needs testing)
+ - Allocator propagation by assignment, swap, and copying (needs testing)
  - Fancy pointers (not yet tested)
  - Queries `allocator_traits` interface exclusively; does not access allocators directly
 
@@ -169,7 +169,8 @@ specialization, it's adopted by following these steps:
 
 4.  If the allocator specifies `propagate_on_container_move_assignment` or `propagate_on_container_copy_assignment`
     (whichever is applicable) as `std::true_type`, then the container's allocator is assigned from the new target.
-    (Assignment to the container's allocator instance, if the source is not a container, is not implemented yet.)
+    
+    If it's a copy operation, that is done by the container's new allocator, and it is updated to reflect any change.
 
 5.  Otherwise, the allocators are compared using the `==` operator. Again, both instances are rebound to a `value_type` of 
     `char`. If they compare equal, then the assignment proceeds as if the container were just a non-container `function`.
@@ -225,8 +226,6 @@ Please report issues [on GitHub](https://github.com/potswa/cxx_function/issues).
   
   The same goes for all cases of double wrapping, really. None of them are semantically incorrect or involve privilege
   violations (such as accidentally allocating with `std::allocator`), but it's an easy mistake which wastes resources.
-
-- Container allocator objects should be updated with more consistency.
 
 
 I'm not adding these bugs to the database myself. Feel free to do so. It helps to mention a motivating case. All are fixable.

@@ -53,7 +53,7 @@ constexpr int operator + ( dispatch_slot e ) { return static_cast< int >( e ); }
 template< typename ... sig >
 struct erasure_base {
     typedef std::tuple<
-        void (erasure_base::*)(), // destructor
+        void (erasure_base::*)( void * alloc ), // destructor
         void (erasure_base::*)( void * dest, void * alloc ) &&, // move constructor
         void (erasure_base::*)( void * dest, void * alloc ) const &, // copy constructor
         
@@ -73,7 +73,7 @@ struct erasure_base {
 // Generic "virtual" functions to manage the wrapper payload lifetime.
 template< typename derived >
 struct erasure_special {
-    void destroy()
+    void destroy( void * )
         { static_cast< derived * >( this )-> ~ derived(); }
     void move( void * dest, void * ) &&
         { new (dest) derived( std::move( * static_cast< derived * >( this ) ) ); }
@@ -85,12 +85,12 @@ struct erasure_special {
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_destructible< derived >::value >::type
-( derived::* erasure_destroy() ) ()
+( derived::* erasure_destroy() ) ( void * )
     { return & derived::destroy; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_destructible< derived >::value >::type
-( derived::* erasure_destroy() ) ()
+( derived::* erasure_destroy() ) ( void * )
     { return nullptr; }
 
 template< typename derived >
@@ -300,19 +300,11 @@ DISPATCH_ALL( ALLOCATOR_CASE )
 template< typename allocator >
 using common_allocator_rebind = typename std::allocator_traits< allocator >::template rebind_alloc< char >;
 
-// The generic erasure_special implementations cannot handle transfers to unequivalent allocators (reallocating to a new memory pool).
-// See specialization below. However, such transfers never happen given propagate_on_container_move_assignment or is_always_equal.
-template< typename derived, typename v = void >
-struct allocator_erasure_special
-    : erasure_special< derived > {};
-
 template< typename allocator, typename target_type, typename ... sig >
 struct allocator_erasure
     : erasure_base< sig ... >
     , allocator // empty base class optimization (EBCO)
-    , allocator_erasure_special< allocator_erasure< allocator, target_type, sig ... > >
     , allocator_dispatch< allocator_erasure< allocator, target_type, sig ... >, 0, sig ... > {
-    using allocator_erasure::allocator_erasure_special::destroy; // Work around name collision from EBCO.
     typedef std::allocator_traits< allocator > allocator_traits;
     typedef common_allocator_rebind< allocator > common_allocator;
     
@@ -332,13 +324,6 @@ struct allocator_erasure
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { allocator_traits::construct( alloc(), target_address(), std::forward< arg >( a ) ... ); }
     
-    ~ allocator_erasure() { // TODO QOI allow exceptions.
-        if ( target ) {
-            allocator_traits::destroy( alloc(), target_address() );
-            allocator_traits::deallocate( alloc(), target, 1 ); // TODO deallocate even if destructor throws.
-        }
-    }
-    
     // Move-construct within the same pool.
     allocator_erasure( allocator_erasure && o ) noexcept
         : allocator_erasure::erasure_base( table )
@@ -356,8 +341,7 @@ struct allocator_erasure
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { allocator_traits::construct( alloc(), target_address(), std::move( * o.target ) ); }
     
-    allocator_erasure( allocator_erasure const & o ) // This is only used if allocator_erasure_special maps to the generic erasure_special.
-        : allocator_erasure( std::allocator_arg, o.alloc(), o ) {}
+    allocator_erasure( allocator_erasure const & o ); // This is only a stub for std::is_copy_constructible.
     
     // Common case: copy-construct with any allocator, same or different.
     allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure const & o )
@@ -365,34 +349,41 @@ struct allocator_erasure
         , allocator( dest_allocator )
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { allocator_traits::construct( alloc(), target_address(), * o.target ); }
-};
-
-template< typename allocator, typename target_type, typename ... sig >
-struct allocator_erasure_special< allocator_erasure< allocator, target_type, sig ... >,
-    typename std::enable_if< ! std::allocator_traits< allocator >::propagate_on_container_move_assignment::value
-        IGNORE( && ! std::allocator_traits< allocator >::is_always_equal::value ) >::type > // Workaround libc++ bug, recently fixed. TODO pull the fix.
-    : erasure_special< allocator_erasure< allocator, target_type, sig ... > > {
-    typedef allocator_erasure< allocator, target_type, sig ... > derived;
-    typedef common_allocator_rebind< allocator > common_allocator;
-    allocator const & alloc() const { return static_cast< derived const & >( * this ); }
     
-    void move( void * dest, void * dest_allocator_v ) && { // dest_allocator_v is nullptr for [unique_]function, non-null for [unique_]function_container.
-        auto dest_allocator = static_cast< common_allocator * >( dest_allocator_v ); // The wrapper verified the safety of this using typeid.
-        if ( ! dest_allocator || * dest_allocator == alloc() ) {
-            new (dest) derived( static_cast< derived && >( * this ) ); // Same pool. Move the pointer, not the object.
+    void move( std::true_type, void * dest, void * dest_allocator_v ) noexcept // Delegate to base class, call ordinary move constructor.
+        { new (dest) allocator_erasure( std::move( * this ) ); } // Move the pointer, not the object. Don't call the allocator at all.
+    
+    void move( std::false_type, void * dest, void * dest_allocator_v ) { // dest_allocator_v is nullptr for [unique_]function, non-null for [unique_]function_container.
+        auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v ); // The wrapper verified the safety of this using typeid.
+        if ( ! dest_allocator_p || * dest_allocator_p == alloc() ) {
+            move( std::true_type{}, dest, dest_allocator_v ); // same pool
         } else {
-            auto & e = * new (dest) derived( std::allocator_arg, * dest_allocator, static_cast< derived && >( * this ) ); // Different pool. Reallocate.
-            * dest_allocator = e.alloc(); // Update the wrapper Allocator instance with the new copy, potentially updated by the new allocation. Is this useful?
+            auto & e = * new (dest) allocator_erasure( std::allocator_arg, * dest_allocator_p, std::move( * this ) ); // Different pool. Reallocate.
+            * dest_allocator_p = e.alloc(); // Update the wrapper allocator instance with the new copy, potentially updated by the new allocation.
         }
+    }
+    void move( void * dest, void * dest_allocator_v ) && { // dest_allocator_v is nullptr for [unique_]function, non-null for [unique_]function_container.
+        move( std::integral_constant< bool, allocator_traits::propagate_on_container_move_assignment::value IGNORE ( || allocator_traits::is_always_equal::value ) >{},
+            dest, dest_allocator_v );
     }
     void copy( void * dest, void * dest_allocator_v ) const & { // dest_allocator_v is nullptr for [unique_]function, non-null for [unique_]function_container.
         auto dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v );
         // Structure the control flow differently to avoid instantiating the copy constructor.
         allocator const & dest_allocator = dest_allocator_p?
             static_cast< allocator const & >( * dest_allocator_p ) : alloc();
-        auto & e = * new (dest) derived( std::allocator_arg, dest_allocator, static_cast< derived const & >( * this ) );
-        if ( dest_allocator_p ) * dest_allocator_p = e.alloc(); // Likewise, update the wrapper Allocator instance with the new copy. Is this useful?
+        auto & e = * new (dest) allocator_erasure( std::allocator_arg, dest_allocator, * this );
+        if ( dest_allocator_p ) * dest_allocator_p = static_cast< common_allocator const & >( e.alloc() ); // Likewise, update the wrapper allocator instance with the new copy.
     }
+    void destroy( void * allocator_v ) noexcept {
+        if ( target ) {
+            allocator alloc_back = std::move( alloc() );
+            allocator_traits::destroy( alloc_back, target_address() );
+            allocator_traits::deallocate( alloc_back, target, 1 ); // TODO continue even if target destructor throws. (And remove the noexcept specs up the call chain.)
+            if ( allocator_v ) * static_cast< common_allocator * >( allocator_v ) = static_cast< common_allocator const & >( alloc() );
+        }
+        this-> ~ allocator_erasure();
+    }
+    ~ allocator_erasure() {} // Don't allow the destructor to be trivial, because then destroy won't be called.
 };
 
 DISPATCH_TABLE( allocator_erasure, target_type, ( typename allocator, typename target_type, typename ... sig ), ( allocator, target_type, sig ... ) )
@@ -489,13 +480,8 @@ protected:
     std::aligned_storage< sizeof (void *[4]), alignof(effective_storage_type) >::type storage;
     void * storage_address() { return & storage; }
     
-    // These functions enter or recover from invalid states.
+    // init and destroy enter or recover from invalid states.
     // They get on the right side of [basic.life]/7.4, but mind the exceptions.
-    
-    void destroy() noexcept {
-        auto nontrivial = std::get< + dispatch_slot::destructor >( erasure().table );
-        if ( nontrivial ) ( erasure() .* nontrivial )();
-    }
     
     // Default, move, and copy construction.
     void init( in_place_t< std::nullptr_t >, std::nullptr_t ) noexcept
@@ -586,6 +572,8 @@ protected:
         if ( * type != typeid (actual_allocator()) ) throw allocator_mismatch_error{}; // Oh no!
         return & actual_allocator();
     }
+    common_allocator_rebind< allocator > * any_allocator()
+        { return & actual_allocator(); }
 public: // Include the container-like interface.
     wrapper_allocator() = default;
     wrapper_allocator( std::allocator_arg_t, allocator const & in_alloc ) noexcept
@@ -613,6 +601,8 @@ protected:
     template< typename erasure_base >
     static constexpr void * compatible_allocator( erasure_base const & e )
         { return nullptr; }
+    static constexpr void * any_allocator()
+        { return nullptr; }
     
     wrapper_no_allocator() = default;
      // This is used internally but not publicly accessible. (It's publicly *visible* because inheriting constructors don't work very well.)
@@ -632,7 +622,6 @@ class wrapper
     using wrapper::wrapper_base::storage;
     using wrapper::wrapper_base::storage_address;
     using wrapper::wrapper_base::init;
-    using wrapper::wrapper_base::destroy;
     
     // Queries on potential targets.
     template< typename source >
@@ -705,6 +694,11 @@ class wrapper
         init( in_place_t< compatible >{}, std::move( next ) );
         //this->actual_allocator() = next.actual_allocator(); -- would be nice to update local allocator state, but can't really keep it consistent.
         return * this;
+    }
+    
+    void destroy() noexcept {
+        auto nontrivial = std::get< + dispatch_slot::destructor >( this->erasure().table );
+        if ( nontrivial ) ( this->erasure() .* nontrivial )( allocator_manager::any_allocator() );
     }
 public:
     using wrapper::wrapper_base::operator ();
