@@ -568,7 +568,7 @@ protected:
     }
     void swap( wrapper_allocator & o ) noexcept
         { do_swap( allocator_traits::propagate_on_container_swap(), o ); }
-    static constexpr bool noexcept_move_assign = typename allocator_traits::propagate_on_container_copy_assignment() IGNORE ( || typename allocator_traits::is_always_equal() );
+    static constexpr bool noexcept_move_assign = allocator_traits::propagate_on_container_move_assignment::value IGNORE ( || allocator_traits::is_always_equal::value );
     static constexpr bool noexcept_move_adopt = false; // Adoption may produce an allocator_mismatch_error.
     
     template< typename t >
