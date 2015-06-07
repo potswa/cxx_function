@@ -202,7 +202,7 @@ struct CLASS ## _dispatch< derived, table_index, ret( arg ... ) QUALS, sig ... >
 // "vtable" generator macro.
 #define DISPATCH_TABLE( NAME, TARGET_TYPE, TPARAM, TARG ) \
 template< UNPACK TPARAM > \
-typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::table = { \
+typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::table = typename NAME::dispatch_table{ \
     erasure_destroy< NAME >(), \
     erasure_move< NAME >(), \
     erasure_copy< NAME >(), \
@@ -372,7 +372,7 @@ struct allocator_erasure
         if ( ! dest_allocator_p || * dest_allocator_p == alloc() ) {
             move( std::true_type{}, dest, dest_allocator_v ); // same pool
         } else {
-            auto & e = * new (dest) allocator_erasure( std::allocator_arg, * dest_allocator_p, std::move( * this ) ); // Different pool. Reallocate.
+            auto & e = * new (dest) allocator_erasure( std::allocator_arg, static_cast< allocator const & >( * dest_allocator_p ), std::move( * this ) ); // Different pool. Reallocate.
             * dest_allocator_p = e.alloc(); // Update the wrapper allocator instance with the new copy, potentially updated by the new allocation.
         }
     }

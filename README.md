@@ -209,8 +209,6 @@ Bugs
 
 Please report issues [on GitHub](https://github.com/potswa/cxx_function/issues). Here are some that are already known:
 
-- Does not currently build using GCC (version 5.1 tested).
-
 - `function` and `unique_function` constructors taking an allocator but no target should be deprecated, and should accept
   any allocator type. Instead, they require a `std::allocator` specialization and give no warning.
   
@@ -230,4 +228,3 @@ Please report issues [on GitHub](https://github.com/potswa/cxx_function/issues).
 
 
 I'm not adding these bugs to the database myself. Feel free to do so. It helps to mention a motivating case. All are fixable.
-Although porting to GCC is somewhat an unknown quantity, it's most likely just some subtle parsing issue.

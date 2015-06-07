@@ -97,9 +97,9 @@ int main() {
     fc2();
     fv();
     
-    assert ( pool[ 0 ] == 32 ); // 32 bytes to store the 29-byte string
-    assert ( pool[ 1 ] == 128 ); // 128 bytes for two 29-byte strings + two stateful_ops
-    assert ( pool[ 2 ] == 64 ); // 64 bytes for one 29-byte string + one stateful_op
+    assert ( pool[ 0 ] == op.state.capacity() + 1 );
+    assert ( pool[ 1 ] == op.state.capacity() * 2 + 2 + sizeof (stateful_op) * 2 );
+    assert ( pool[ 2 ] == op.state.capacity() + 1 + sizeof (stateful_op) );
     
     fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
     fc1 = fc2;
