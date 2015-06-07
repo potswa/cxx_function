@@ -344,9 +344,6 @@ struct allocator_erasure
         , allocator( std::move( o.alloc() ) )
         , target( std::move( o.target ) )
         { o.target = nullptr; } // Prevent double deallocation. Could be trivial but for this.
-        /*  Letting the wrapper do memset on the source of a trivial move, to trivialize the almost-trivial cases here, is possibly viable.
-            It would violate the moved-from state of local erasures. However, they always get blown away after a move anyway.
-            The optimization would need to check that Allocator::pointer is a native pointer. */
     
     // Move-construct into a different pool.
     allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure && o )
@@ -662,7 +659,7 @@ class wrapper
         auto nontrivial = std::get< + dispatch_slot::move_constructor >( o.erasure().table );
         if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
         else nontrivial( std::move( o ).erasure(), storage_address(), allocator_manager::compatible_allocator( o.erasure() ) );
-        o.destroy();
+        o.destroy(); // TODO incorporate this into a combined move-and-destroy operation.
         o.init( in_place_t< std::nullptr_t >{}, nullptr );
     }
     template< typename source >
