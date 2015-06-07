@@ -40,7 +40,8 @@ Highlights
 - Efficiency
  - Economizes space better than libc++ (Clang)
  - Economizes branch instructions better than libstdc++ (GCC)
- - Avoids indirect branches for trivial target copy construction, move construction, and destruction
+ - Performs well [compared](https://github.com/jamboree/CxxFunctionBenchmark) to similar third-party libraries.
+ - Avoids indirect branches for trivial target object copy construction, move construction, and destruction
    (common case for lambdas)
 
 
