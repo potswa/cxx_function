@@ -377,11 +377,9 @@ struct allocator_erasure
         }
     }
     // [dest_]allocator_v is always nullptr for [unique_]function, non-null for [unique_]function_container.
-    static void move( erasure_handle && self_base, void * dest, void * dest_allocator_v ) {
-        static_cast< allocator_erasure && >( self_base )
-            .move( std::integral_constant< bool, allocator_traits::propagate_on_container_move_assignment::value IGNORE ( || allocator_traits::is_always_equal::value ) >{},
-                dest, dest_allocator_v );
-    }
+    static void move( erasure_handle && self_base, void * dest, void * dest_allocator_v )
+        { static_cast< allocator_erasure && >( self_base ).move( std::false_type{} IGNORE ( typename allocator_traits::is_always_equal{} ), dest, dest_allocator_v ); }
+    
     static void copy( erasure_handle const & self_base, void * dest, void * dest_allocator_v ) {
         auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v );
         auto & self = static_cast< allocator_erasure const & >( self_base );
