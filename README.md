@@ -145,9 +145,10 @@ when possible, as it automatically computes and sets `noexcept` for you.
 
 ## Allocators
 
-This library implements a new allocator model, conforming (almost, see bugs) to the C++11 specification. (How can it be both
+This library implements a new allocator model, conforming (almost, see "Bugs" below) to the C++11 specification. (How can it be both
 new and old? Because the normative `std::function` allocator model has been underspecified, there are several equally-conforming
-models.)
+models.) As for `function` alone, this library behaviorally matches libc++ and libstdc++, but additionally supporting the allocator
+methods `construct` and `destroy`.
 
 `function` and `unique_function` use an allocator to handle target objects that cannot fit into the wrapper storage (equal to
 the size of three pointers). They behave as clients of the allocator, but not as containers. The behavior of `std::shared_ptr`
@@ -159,25 +160,23 @@ allocator instance, of a type given by the initial template argument. The target
 given allocator, or only the storage within the wrapper. When a pre-existing target is assigned from a corresponding wrapper
 specialization, it's adopted by following these steps:
 
-1.  If the target is stored within the wrapper, allocators aren't an issue. It's copied or moved directly, using `memcpy` if
+1.  If the allocator specifies `propagate_on_container_move_assignment` or `propagate_on_container_copy_assignment`
+    (whichever is applicable) as `std::true_type`, and the source is also a container, then the allocator is assigned.
+
+2.  If the target is stored within the wrapper, allocators aren't an issue. It's copied or moved directly, using `memcpy` if
     possible.
 
-2.  Otherwise, the type of the new target's allocator is compared to the type of the container allocator. Both are rebound to
+3.  Otherwise, the type of the new target's allocator is compared to the type of the container allocator. Both are rebound to
     `Allocator< char >` and the resulting types are compared using `typeid`.
 
-3.  **If the types don't match, an exception is thrown!** Do not let this happen: only assign to `function_container` when
+4.  **If the types don't match, an exception is thrown!** Do not let this happen: only assign to `function_container` when
     you know the memory scheme originating the assigned value. The type of the exception is `allocator_mismatch_error`.
-
-4.  If the allocator specifies `propagate_on_container_move_assignment` or `propagate_on_container_copy_assignment`
-    (whichever is applicable) as `std::true_type`, then the container's allocator is assigned from the new target.
-    
-    If it's a copy operation, that is done by the container's new allocator, and it is updated to reflect any change.
 
 5.  Otherwise, the allocators are compared using the `==` operator. Again, both instances are rebound to a `value_type` of 
     `char`. If they compare equal, then the assignment proceeds as if the container were just a non-container `function`.
     
-    If they are unequal, then the target is reallocated by the container's allocator. The container's allocator is then
-    updated to reflect any change. (The new value is still equal to the old value, though.)
+    If they are unequal, or if it's a copy-assignment, the target is reallocated by the container's allocator. The
+    container's allocator is then updated to reflect any change. (The new value is still equal to the old value, though.)
 
 6.  In any case, if the operation is a move, the source wrapper is set to `nullptr`. This guarantees deallocation from the
     source memory pool when the destination pool is different.
@@ -187,6 +186,24 @@ allocator. Ideally, the compiler will complain that the allocator cannot be defa
 should probably be deprecated, because it looks like the allocator is getting dynamically copy/move-initialized.
 
 Since the allocator of `function_container` is fixed, it does not implement the `assign` or `allocate_assign` functions.
+
+
+### Propagation
+
+Container allocators are "sticky:" the allocator designated at initialization is used throughout the container's lifetime.
+
+Non-container `function` allocators are "stealthy:" the allocator is only used to manage the target object, and any copies
+of it. It cannot be observed by `get_allocator`. (It really does exist though, and an accessor could easily be implemented.)
+
+There exist allocator properties `propagate_on_container_move_assignment` and `propagate_on_container_copy_assignment`.
+These affect the semantics of assignment between containers, but do not enable a container to observe the allocator of a
+non-container. They reduce stickiness, but not stealthiness.
+
+POCMA and POCCA have a similar effect on `function_container` as on any other container such as `std::vector`. In particular,
+POCMA is sufficient for container move assignment to be `noexcept`. However, `is_always_equal` is also sufficient for that,
+and using these traits is a serious anti-pattern: Allocators are supposed to be orthogonal to containers. `is_always_equal`
+furthermore eliminates the requirement that the target be move-constructible, which POCMA does not do. It is the better
+alternative. (However, `is_always_equal` support is only getting added to libc++ and libstdc++ as I write this.)
 
 
 ### Usage
@@ -201,7 +218,14 @@ Memory management gets harder as it gets stricter. Here are some ground rules fo
 3.  Use `function_container` only for persistent storage; don't pass it around everywhere. It's not suitable as a value type.
     Use `function` for that. Do not try to hack the allocator model using `propagate_on_container_*_assignment`.
 
-4.  If you're afraid about copies running against resource constraints, use `unique_*`.
+4.  If you're afraid about copies running against resource constraints, use `unique_*`. Note that when you give a `function`
+    to someone, they may (in theory) make unlimited copies of it. On the other hand, resource exhaustion is something that
+    allocators manage, so you should be prepared for this case and not "afraid" of it :) .
+
+5.  The memory resource backing the allocators must persist as long as any functions may be alive and using the storage.
+    Always assert that memory resources (pools) are empty before freeing them, lest references go dangling. Do not pass
+    custom-allocated functions to a library that will retain them indefinitely, unless you're willing to take a risk by either
+    (a) destroying the pool at the last possible moment before program termination or (b) not destroying the pool at all.
 
 
 Bugs
