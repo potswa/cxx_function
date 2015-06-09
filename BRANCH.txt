@@ -1,0 +1,6 @@
+This branch supports throwing destructors, allocator_traits::destroy, and allocator_traits::deallocate.
+
+It's a neat demo, for shits and giggles. It doesn't work very well, because:
+
+1. Type erasure requires that the wrapper destructor be unconditionally noexcept(false) if the erasure destructor can throw.
+2. libc++ nonconformingly declares allocator_traits::deallocate as noexcept, so it only works on GCC.

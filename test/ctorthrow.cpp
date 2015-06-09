@@ -1,4 +1,3 @@
-#include <iostream>
 #include "cxx_function.hpp"
 
 struct ctor_error : std::exception {};
@@ -12,19 +11,17 @@ struct throwy {
     
     throwy( throwy && o )
         : when( o.when ) {
-        std::cerr << "throwy move\n";
         o.when = 0;
         if ( when == 2 ) throw ctor_error{};
     }
     throwy( throwy const & o )
         : when( o.when ) {
-        std::cerr << "throwy copy\n";
         o.when = 0;
         if ( when == 3 ) throw ctor_error{};
     }
     ~ throwy() noexcept(false) {
         if ( when == 4 ) throw ctor_error{};
-        if ( when != 0 ) std::cerr << "premature destruction\n", abort();
+        if ( when != 0 ) abort();
     }
     
     void operator () () {}
@@ -42,12 +39,14 @@ struct alloc {
         : count( o.count ) {}
     
     t * allocate( std::size_t n ) {
-        std::cerr << "+ " << count << '\n';
         ++ * count;
         return static_cast< t * >( ::operator new( n * sizeof (t) ) );
     }
     void deallocate( t * p, std::size_t ) {
-        std::cerr << "- " << count << '\n';
+        if ( * count == 0 ) {
+            count = nullptr;
+            throw ctor_error{};
+        }
         -- * count;
         ::operator delete( p );
     }
@@ -55,7 +54,7 @@ struct alloc {
 
 template< typename t, typename u >
 bool operator == ( alloc< t > const & lhs, alloc< u > const & rhs )
-    { if ( lhs.count != rhs.count ) std::cerr << "un"; std::cerr << "equal\n"; return lhs.count == rhs.count; }
+    { return lhs.count == rhs.count; }
 template< typename t, typename u >
 bool operator != ( alloc< t > const & lhs, alloc< u > const & rhs )
     { return lhs.count != rhs.count; }
@@ -104,4 +103,39 @@ int main() {
     f();
     auto g = f;
     assert ( count_f == 2 );
+    
+    f.emplace_assign< throwy >( 4 );
+    try {
+        f = []{};
+        abort();
+    } catch ( ctor_error & ) {}
+    assert ( ! f );
+    
+    f.allocate_assign< throwy >( alloc< throwy >{ & count_f }, 4 );
+    g = nullptr;
+    assert ( count_f == 1 );
+    try {
+        f = []{};
+        abort();
+    } catch ( ctor_error & ) {}
+    assert ( count_f == 0 );
+    assert ( ! f );
+    
+    function_container< alloc< throwy >, void() > c( std::allocator_arg, alloc< throwy >{ & count_f }, in_place_t< throwy >{}, 4 );
+    assert ( count_f == 1 );
+    try {
+        c = []{};
+        abort();
+    } catch ( ctor_error & ) {}
+    assert ( count_f == 0 );
+    assert ( ! f );
+    
+    c = throwy{ 0 };
+    count_f = 0;
+    try {
+        c = []{};
+        abort();
+    } catch ( ctor_error & ) {}
+    assert ( c.get_allocator().count == nullptr );
+    assert ( ! c );
 }

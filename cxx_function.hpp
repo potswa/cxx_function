@@ -77,6 +77,9 @@ enum class dispatch_slot {
 };
 constexpr int operator + ( dispatch_slot e ) { return static_cast< int >( e ); }
 
+template< typename ... sig >
+struct null_erasure;
+
 // "Abstract" base class for the island inside the wrapper class, e.g. std::function.
 // This must appear first in the most-derived class layout.
 template< typename ... sig >
@@ -92,6 +95,7 @@ struct erasure_base : erasure_handle {
         
         typename implicit_object_to_parameter< sig >::type ... // dispatchers
     > dispatch_table;
+    typedef impl::null_erasure< sig ... > null_erasure;
     
     dispatch_table const & table;
     
@@ -102,8 +106,12 @@ struct erasure_base : erasure_handle {
 // Generic "virtual" functions to manage the wrapper payload lifetime.
 template< typename derived >
 struct erasure_special {
-    static void destroy( erasure_handle & self, void * ) noexcept
-        { static_cast< derived & >( self ). ~ derived(); }
+    static void destroy( erasure_handle & self, void * ) try {
+        static_cast< derived & >( self ). ~ derived();
+    } catch (...) { // If the wrapper isn't being destroyed, give it a token erasure to destroy later. Or not, since null_erasure is trivially destructible.
+        new (static_cast< void * >( static_cast< typename derived::null_erasure * >( & self ) )) typename derived::null_erasure;
+        throw;
+    }
     static void move( erasure_handle && self, void * dest, void *, void * ) {
         new (dest) derived( std::move( static_cast< derived & >( self ) ) );
         destroy( self, {} );
@@ -402,12 +410,29 @@ struct allocator_erasure
         auto & e = * new (dest) allocator_erasure( std::allocator_arg, dest_allocator, self );
         if ( dest_allocator_p ) * dest_allocator_p = static_cast< common_allocator const & >( e.alloc() ); // Likewise, update the wrapper allocator instance with the new copy.
     }
-    static void destroy( erasure_handle & self_base, void * allocator_v ) noexcept {
+    static void destroy( erasure_handle & self_base, void * allocator_v ) try {
         auto & self = static_cast< allocator_erasure & >( self_base );
-        allocator_traits::destroy( self.alloc(), self.target_address() );
-        allocator_traits::deallocate( self.alloc(), self.target, 1 ); // TODO continue even if target destructor throws. (And remove the noexcept specs up the call chain.)
-        if ( allocator_v ) * static_cast< common_allocator * >( allocator_v ) = static_cast< common_allocator const & >( self.alloc() );
-        self. ~ allocator_erasure();
+        struct param {
+            allocator_erasure & self;
+            void * allocator_v;
+        } p{ self, allocator_v };
+        struct guard_destroy {
+            param p;
+            ~ guard_destroy() noexcept(false) {
+                struct guard_deallocate {
+                    param p;
+                    ~ guard_deallocate() {
+                        if ( p.allocator_v ) * static_cast< common_allocator * >( p.allocator_v ) = static_cast< common_allocator const & >( p.self.alloc() ); // step 3
+                        p.self. ~ allocator_erasure(); // step 4
+                    }
+                } g{ p };
+                allocator_traits::deallocate( p.self.alloc(), p.self.target, 1 ); // step 2 (even if the destructor throws)
+            }
+        } g{ p };
+        allocator_traits::destroy( self.alloc(), self.target_address() ); // step 1
+    } catch (...) {
+        new (static_cast< void * >( static_cast< typename allocator_erasure::null_erasure * >( & self_base ) )) typename allocator_erasure::null_erasure; // step 5 (only on error)
+        throw;
     }
     ~ allocator_erasure() {} // Don't allow the destructor to be trivial, because then destroy won't be called.
 };
@@ -731,14 +756,14 @@ class wrapper
     init( in_place_t< source > t, arg && ... a )
         { init( std::allocator_arg, allocator_manager::actual_allocator(), t, std::forward< arg >( a ) ... ); }
     
-    wrapper & finish_assign ( wrapper && next ) noexcept {
+    wrapper & finish_assign ( wrapper && next ) {
         destroy();
         init( in_place_t< wrapper >{}, std::move( next ) );
         this->actual_allocator() = next.actual_allocator();
         return * this;
     }
     
-    void destroy() noexcept {
+    void destroy() {
         auto nontrivial = std::get< + dispatch_slot::destructor >( this->erasure().table );
         if ( nontrivial ) nontrivial( this->erasure(), allocator_manager::any_allocator() );
     }
@@ -805,7 +830,7 @@ public:
         : allocator_manager( std::allocator_arg, alloc )
         { init( std::allocator_arg, alloc, t, std::forward< arg >( a ) ... ); }
     
-    ~ wrapper() noexcept
+    ~ wrapper() noexcept(false)
         { destroy(); }
     
     wrapper & operator = ( wrapper && s )
