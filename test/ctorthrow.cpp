@@ -1,4 +1,3 @@
-#include <iostream>
 #include "cxx_function.hpp"
 
 struct ctor_error : std::exception {};
@@ -12,19 +11,16 @@ struct throwy {
     
     throwy( throwy && o )
         : when( o.when ) {
-        std::cerr << "throwy move\n";
         o.when = 0;
         if ( when == 2 ) throw ctor_error{};
     }
     throwy( throwy const & o )
         : when( o.when ) {
-        std::cerr << "throwy copy\n";
         o.when = 0;
         if ( when == 3 ) throw ctor_error{};
     }
-    ~ throwy() noexcept(false) {
-        if ( when == 4 ) throw ctor_error{};
-        if ( when != 0 ) std::cerr << "premature destruction\n", abort();
+    ~ throwy() {
+        if ( when != 0 ) abort();
     }
     
     void operator () () {}
@@ -42,12 +38,10 @@ struct alloc {
         : count( o.count ) {}
     
     t * allocate( std::size_t n ) {
-        std::cerr << "+ " << count << '\n';
         ++ * count;
         return static_cast< t * >( ::operator new( n * sizeof (t) ) );
     }
     void deallocate( t * p, std::size_t ) {
-        std::cerr << "- " << count << '\n';
         -- * count;
         ::operator delete( p );
     }
@@ -55,7 +49,7 @@ struct alloc {
 
 template< typename t, typename u >
 bool operator == ( alloc< t > const & lhs, alloc< u > const & rhs )
-    { if ( lhs.count != rhs.count ) std::cerr << "un"; std::cerr << "equal\n"; return lhs.count == rhs.count; }
+    { return lhs.count == rhs.count; }
 template< typename t, typename u >
 bool operator != ( alloc< t > const & lhs, alloc< u > const & rhs )
     { return lhs.count != rhs.count; }
