@@ -337,10 +337,7 @@ struct allocator_erasure
     void construct_safely( arg && ... a ) try {
         allocator_traits::construct( alloc(), target_address(), std::forward< arg >( a ) ... );
     } catch (...) {
-        struct guard { // allocator_traits::deallocate is allowed to throw. Be sure to terminate if it does.
-            allocator_erasure & o;
-            ~ guard() { allocator_traits::deallocate( o.alloc(), o.target, 1 ); }
-        } g{ * this };
+        allocator_traits::deallocate( alloc(), target, 1 ); // Does not throw according to [allocator.requirements] §17.6.3.5 and DR2384.
         throw;
     } // The wrapper allocator instance cannot be updated following a failed initialization because the erasure allocator is already gone.
     
@@ -405,7 +402,7 @@ struct allocator_erasure
     static void destroy( erasure_handle & self_base, void * allocator_v ) noexcept {
         auto & self = static_cast< allocator_erasure & >( self_base );
         allocator_traits::destroy( self.alloc(), self.target_address() );
-        allocator_traits::deallocate( self.alloc(), self.target, 1 ); // TODO continue even if target destructor throws. (And remove the noexcept specs up the call chain.)
+        allocator_traits::deallocate( self.alloc(), self.target, 1 );
         if ( allocator_v ) * static_cast< common_allocator * >( allocator_v ) = static_cast< common_allocator const & >( self.alloc() );
         self. ~ allocator_erasure();
     }
