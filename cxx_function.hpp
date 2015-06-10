@@ -1025,6 +1025,7 @@ DEFINE_WRAPPER_OPS( unique_function_container )
 #undef UNPACK
 #undef IGNORE
 #undef DISPATCH_CASE
+#undef ERASURE_DISPATCH_CASE
 #undef DISPATCH_CQ
 #undef DISPATCH_CV
 #undef DISPATCH_CVREFQ
