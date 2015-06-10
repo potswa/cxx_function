@@ -39,7 +39,7 @@ namespace impl {
 
 // Convert a member function signature to its free invocation counterpart.
 template< typename sig >
-class implicit_object_to_parameter;
+struct implicit_object_to_parameter;
 
 template< typename t >
 struct add_reference
@@ -217,7 +217,9 @@ typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::tabl
 
 // Implement the uninitialized state.
 DISPATCH_BASE_CASE( null )
-#define NULL_CASE( QUALS, UNSAFE ) ERASURE_DISPATCH_CASE( QUALS, null, throw std::bad_function_call{}; )
+#define NULL_CASE( QUALS, UNSAFE ) ERASURE_DISPATCH_CASE( QUALS, null, \
+    (void) sizeof ... (a); (void) self; throw std::bad_function_call{}; \
+)
 DISPATCH_ALL( NULL_CASE )
 #undef NULL_CASE
 
@@ -383,7 +385,7 @@ struct allocator_erasure
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { construct_safely( * o.target ); }
     
-    void move( std::true_type, void * dest, void * source_allocator_v, void * dest_allocator_v ) noexcept { // Call ordinary move constructor.
+    void move( std::true_type, void * dest, void *, void * ) noexcept { // Call ordinary move constructor.
         new (dest) allocator_erasure( std::move( * this ) ); // Move the pointer, not the object. Don't call the allocator at all.
         this-> ~ allocator_erasure();
     }
@@ -635,7 +637,7 @@ protected:
     std::allocator< char > actual_allocator() { return {}; }
     
     template< typename erasure_base >
-    static constexpr void * compatible_allocator( erasure_base const & e )
+    static constexpr void * compatible_allocator( erasure_base const & )
         { return nullptr; }
     static constexpr void * any_allocator()
         { return nullptr; }
@@ -703,7 +705,7 @@ class wrapper
     template< typename source, typename ... arg >
     typename std::enable_if< is_compatibly_wrapped< source >::value && ! std::is_same< source, wrapper >::value >::type
     init( in_place_t< source > t, arg && ... a )
-        { init( in_place_t< source >{}, source( std::forward< arg >( a ) ... ) ); }
+        { init( t, source( std::forward< arg >( a ) ... ) ); }
     
     // Discard an allocator argument that is unused or already permanently retained.
     template< typename allocator, typename source, typename ... arg >
@@ -733,7 +735,7 @@ class wrapper
         static_assert ( is_allocator_erasure< erasure >::value, "" );
         // TODO: Add a new erasure template to put the fancy pointer on the heap.
         static_assert ( sizeof (erasure) <= sizeof storage, "Stateful allocator or fancy pointer is too big for polymorphic function wrapper." );
-        auto & e = * new (storage_address()) erasure( alloc, std::forward< arg >( a ) ... );
+        new (storage_address()) erasure( alloc, std::forward< arg >( a ) ... );
     }
     template< typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
