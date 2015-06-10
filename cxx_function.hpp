@@ -315,6 +315,18 @@ DISPATCH_ALL( ALLOCATOR_CASE )
 template< typename allocator >
 using common_allocator_rebind = typename std::allocator_traits< allocator >::template rebind_alloc< char >;
 
+template< typename t, typename = void, typename = void >
+struct is_always_equal : std::false_type {};
+template< typename t >
+struct is_always_equal< t, void, typename std::enable_if< std::allocator_traits< t >::is_always_equal::value >::type >
+    : std::true_type {};
+template< typename t, typename v >
+struct is_always_equal< t, v, typename std::enable_if< decltype (std::declval< t >() == std::declval< t >())::value >::type >
+    : std::true_type {};
+template< typename t >
+struct is_always_equal< std::allocator< t > >
+    : std::true_type {};
+
 template< typename allocator, typename target_type, typename ... sig >
 struct allocator_erasure
     : erasure_base< sig ... >
@@ -371,13 +383,14 @@ struct allocator_erasure
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { construct_safely( * o.target ); }
     
-    void move( std::true_type, void * dest, void * dest_allocator_v ) noexcept // Delegate to base class, call ordinary move constructor.
-        { new (dest) allocator_erasure( std::move( * this ) ); } // Move the pointer, not the object. Don't call the allocator at all.
-    
+    void move( std::true_type, void * dest, void * source_allocator_v, void * dest_allocator_v ) noexcept { // Call ordinary move constructor.
+        new (dest) allocator_erasure( std::move( * this ) ); // Move the pointer, not the object. Don't call the allocator at all.
+        this-> ~ allocator_erasure();
+    }
     void move( std::false_type, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
         auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v ); // The wrapper verified the safety of this using typeid.
         if ( ! dest_allocator_p || * dest_allocator_p == alloc() ) {
-            move( std::true_type{}, dest, dest_allocator_v ); // same pool
+            move( std::true_type{}, dest, source_allocator_v, dest_allocator_v ); // same pool
         } else {
             auto & e = * new (dest) allocator_erasure( std::allocator_arg, static_cast< allocator const & >( * dest_allocator_p ), std::move( * this ) ); // Different pool. Reallocate.
             * dest_allocator_p = e.alloc(); // Update the wrapper allocator instance with the new copy, potentially updated by the new allocation.
@@ -387,8 +400,7 @@ struct allocator_erasure
     // [*_]allocator_v points to the wrapper allocator instance, if any.
     static void move( erasure_handle && self_base, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure & >( self_base );
-        std::move( self ).move( std::false_type{} IGNORE ( typename allocator_traits::is_always_equal{} ), dest, source_allocator_v, dest_allocator_v );
-        self. ~ allocator_erasure();
+        std::move( self ).move( is_always_equal< allocator >{}, dest, source_allocator_v, dest_allocator_v );
     }
     static void copy( erasure_handle const & self_base, void * dest, void * dest_allocator_v ) {
         auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v );
@@ -578,7 +590,7 @@ protected:
     }
     void swap( wrapper_allocator & o ) noexcept
         { do_swap( allocator_traits::propagate_on_container_swap(), o ); }
-    static constexpr bool noexcept_move_assign = allocator_traits::propagate_on_container_move_assignment::value IGNORE ( || allocator_traits::is_always_equal::value );
+    static constexpr bool noexcept_move_assign = allocator_traits::propagate_on_container_move_assignment::value || is_always_equal< allocator >::value;
     static constexpr bool noexcept_move_adopt = false; // Adoption may produce an allocator_mismatch_error.
     
     template< typename derived, typename t >
