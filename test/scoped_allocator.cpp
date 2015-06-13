@@ -100,7 +100,18 @@ int main() {
     assert ( pool[ 0 ] == op.state.capacity() + 1 );
     assert ( pool[ 1 ] == op.state.capacity() * 2 + 2 + sizeof (stateful_op) * 2 );
     assert ( pool[ 2 ] == op.state.capacity() + 1 + sizeof (stateful_op) );
+    {
+        std::map< int, function< void() >, std::less< int >, fct::allocator_type > m( pool_alloc< char >{ 3 } );
     
+        #if __clang__
+        m[ 42 ].assign( fv, m.get_allocator() );
+        #else
+        m.insert( std::make_pair( 42, fv ) );
+        #endif
+        std::size_t pre = pool[ 3 ];
+        pool_string{ pool_alloc< char >{ 3 } }.swap( m[ 42 ].target< stateful_op >()->state );
+        assert ( pre - pool[ 3 ] == op.state.capacity() + 1 );
+    }
     fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
     fc1 = fc2;
     fv = nullptr;
