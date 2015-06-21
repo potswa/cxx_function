@@ -393,8 +393,9 @@ struct allocator_erasure
         auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v ); // The wrapper verified the safety of this using typeid.
         if ( ! dest_allocator_p || * dest_allocator_p == alloc() ) {
             move( std::true_type{}, dest, source_allocator_v, dest_allocator_v ); // same pool
-        } else {
-            auto & e = * new (dest) allocator_erasure( std::allocator_arg, static_cast< allocator const & >( * dest_allocator_p ), std::move( * this ) ); // Different pool. Reallocate.
+        } else { // different pool
+            auto & e = * new (dest) allocator_erasure( std::allocator_arg, static_cast< allocator >( * dest_allocator_p ), // Reallocate.
+                std::move_if_noexcept( * this ) ); // Protect user against their own throwing move constructors.
             * dest_allocator_p = e.alloc(); // Update the wrapper allocator instance with the new copy, potentially updated by the new allocation.
             destroy( * this, source_allocator_v );
         }
