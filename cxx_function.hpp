@@ -676,11 +676,15 @@ class wrapper
     };
     
     template< typename, typename = void >
-    struct is_compatibly_wrapped : std::false_type {};
+    struct is_compatibly_wrapped : std::false_type
+        { static const bool with_compatible_allocation = false; };
     template< typename source >
     struct is_compatibly_wrapped< source, typename std::enable_if<
             std::is_same< typename wrapper::wrapper_base, typename source::wrapper_base >::value >::type >
-        : std::true_type {};
+        : std::true_type {
+        static const bool with_compatible_allocation = allocator_manager::noexcept_move_adopt
+            || std::is_same< typename wrapper::allocator_type, typename source::allocator_type >::value;
+    };
     
     // Adopt by move.
     template< typename source >
@@ -786,7 +790,7 @@ public:
         >::type * = nullptr >
     wrapper( source && s )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value
-            || ( allocator_manager::noexcept_move_adopt && is_compatibly_wrapped< source >::value ) )
+            || is_compatibly_wrapped< source >::with_compatible_allocation )
         { init( in_place_t< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
 
     // Prevent slicing fallback to copy/move constructor.
@@ -844,7 +848,7 @@ public:
         >::type * = nullptr >
     wrapper &
     operator = ( source && s )
-    noexcept( allocator_manager::noexcept_move_adopt )
+    noexcept( is_compatibly_wrapped< source >::with_compatible_allocation && allocator_manager::noexcept_move_assign )
         { return finish_assign( allocator_manager::template reallocate< wrapper >( std::forward< source >( s ) ) ); }
     
     template< typename source,
