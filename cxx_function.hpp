@@ -62,7 +62,7 @@ DISPATCH_ALL( TYPE_CONVERT_CASE )
     2. Eliminate overhead and ABI issues associated with RTTI and weak linkage.
     3. Allow static data entries as well as functions.
     
-    The table is stored as a std::tuple of PTMFs and type_info*'s.
+    The table is stored as a std::tuple of function pointers and type_info*'s.
     Entries that would be trivial or useless may be set to nullptr.
 */
 enum class dispatch_slot {
@@ -180,7 +180,7 @@ struct NAME ## _dispatch { \
 #define UNPACK(...) __VA_ARGS__
 #define IGNORE(...)
 
-// This macro generates a recursive template handling one type qualifier sequence (e.g. "volatile &" or "const."
+// This macro generates a recursive template handling one type qualifier sequence, e.g. "volatile &" or "const."
 // The final product converts a sequence of qualified signatures into an overload set, potentially with special cases for signatures of no qualification.
 #define DISPATCH_CASE( \
     QUALS, /* The type qualifiers for this case. */ \
@@ -808,7 +808,7 @@ public:
     wrapper( std::allocator_arg_t, allocator const & alloc, source && s )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value )
         : allocator_manager( std::allocator_arg, alloc )
-         { init( std::allocator_arg, alloc, in_place_t< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
+        { init( std::allocator_arg, alloc, in_place_t< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
     
     template< typename source, typename ... arg,
         typename = typename std::enable_if< is_targetable< source >::value >::type >
