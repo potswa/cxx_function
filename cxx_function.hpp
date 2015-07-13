@@ -113,46 +113,54 @@ struct erasure_special {
 };
 
 // These accessors generate "vtable" entries, but avoid instantiating functions that do not exist or would be trivial.
+// Most are specialized for allocator_erasure.
+template< typename >
+struct is_allocator_erasure : std::false_type {};
+
 template< typename derived >
 constexpr typename std::enable_if<
-    ! std::is_trivially_destructible< derived >::value >::type
+    ! std::is_trivially_destructible< derived >::value
+    || is_allocator_erasure< derived >::value >::type
 ( * erasure_destroy() ) ( erasure_handle &, void * )
     { return & derived::destroy; }
 template< typename derived >
 constexpr typename std::enable_if<
-    std::is_trivially_destructible< derived >::value >::type
+    std::is_trivially_destructible< derived >::value
+    && ! is_allocator_erasure< derived >::value >::type
 ( * erasure_destroy() ) ( erasure_handle &, void * )
     { return nullptr; }
 
+template< typename erasure, typename = void >
+struct erasure_trivially_movable : std::false_type {};
+template< typename erasure >
+struct erasure_trivially_movable< erasure, typename std::enable_if<
+    std::is_trivially_constructible< erasure, erasure >::value
+    && std::is_trivially_destructible< erasure >::value >::type > : std::true_type {};
+
 template< typename derived >
-constexpr typename std::enable_if<
-    ! std::is_trivially_constructible< derived, derived >::value >::type
+constexpr typename std::enable_if< ! erasure_trivially_movable< derived >::value >::type
 ( * erasure_move() ) ( erasure_handle &&, void *, void *, void * )
     { return & derived::move; }
 template< typename derived >
-constexpr typename std::enable_if<
-    std::is_trivially_constructible< derived, derived >::value >::type
+constexpr typename std::enable_if< erasure_trivially_movable< derived >::value >::type
 ( * erasure_move() ) ( erasure_handle &&, void *, void *, void * )
     { return nullptr; }
 
+template< typename erasure, typename = void >
+struct erasure_nontrivially_copyable : std::true_type {};
+template< typename erasure >
+struct erasure_nontrivially_copyable< erasure, typename std::enable_if<
+    std::is_copy_constructible< erasure >::value
+    && ! std::is_trivially_copy_constructible< erasure >::value >::type > : std::true_type {};
+
 template< typename derived >
-constexpr typename std::enable_if<
-    std::is_copy_constructible< derived >::value
-    && ! std::is_trivially_copy_constructible< derived >::value >::type
+constexpr typename std::enable_if< erasure_nontrivially_copyable< derived >::value >::type
 ( * erasure_copy() ) ( erasure_handle const &, void *, void * )
     { return & derived::copy; }
 template< typename derived >
-constexpr typename std::enable_if<
-    ! std::is_copy_constructible< derived >::value
-    || std::is_trivially_copy_constructible< derived >::value >::type
+constexpr typename std::enable_if< ! erasure_nontrivially_copyable< derived >::value >::type
 ( * erasure_copy() ) ( erasure_handle const &, void *, void * )
     { return nullptr; }
-
-template< typename, typename = void >
-struct is_allocator_erasure : std::false_type {};
-template< typename erasure >
-struct is_allocator_erasure< erasure, decltype(void(typename std::allocator_traits< typename erasure::common_allocator >::pointer{})) >
-    : std::true_type {};
 
 template< typename derived >
 constexpr typename std::enable_if< is_allocator_erasure< derived >::value,
@@ -362,21 +370,12 @@ struct allocator_erasure
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { construct_safely( std::forward< arg >( a ) ... ); }
     
-    // Move-construct within the same pool.
-    // This definition is effectively the same as the default, but a defaulted definition would (usually) be trivial, and then we would optimize out allocator_erasure::move.
-    allocator_erasure( allocator_erasure && o ) noexcept
-        : allocator_erasure::erasure_base( table )
-        , allocator( std::move( o.alloc() ) )
-        , target( std::move( o.target ) ) {}
-    
     // Move-construct into a different pool.
     allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure && o )
         : allocator_erasure::erasure_base( table )
         , allocator( dest_allocator )
         , target( allocator_traits::allocate( alloc(), 1 ) )
         { construct_safely( std::move( * o.target ) ); }
-    
-    allocator_erasure( allocator_erasure const & o ); // This is only a stub for std::is_copy_constructible.
     
     // Common case: copy-construct with any allocator, same or different.
     allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure const & o )
@@ -403,6 +402,7 @@ struct allocator_erasure
     // [*_]allocator_v points to the wrapper allocator instance, if any.
     static void move( erasure_handle && self_base, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure & >( self_base );
+        // is_always_equal is usually false here, because it correlates with triviality which short-circuits this function.
         std::move( self ).move( is_always_equal< allocator >{}, dest, source_allocator_v, dest_allocator_v );
     }
     static void copy( erasure_handle const & self_base, void * dest, void * dest_allocator_v ) {
@@ -421,8 +421,20 @@ struct allocator_erasure
         if ( allocator_v ) * static_cast< common_allocator * >( allocator_v ) = static_cast< common_allocator const & >( self.alloc() );
         self. ~ allocator_erasure();
     }
-    ~ allocator_erasure() {} // Don't allow the destructor to be trivial, because then destroy won't be called.
 };
+
+template< typename allocator, typename target_type, typename ... sig >
+struct is_allocator_erasure< allocator_erasure< allocator, target_type, sig ... > > : std::true_type {};
+
+template< typename allocator, typename target_type, typename ... sig >
+struct erasure_trivially_movable< allocator_erasure< allocator, target_type, sig ... >, typename std::enable_if<
+    std::is_trivially_constructible< allocator_erasure< allocator, target_type, sig ... >, allocator_erasure< allocator, target_type, sig ... > >::value
+    && std::is_trivially_destructible< allocator_erasure< allocator, target_type, sig ... > >::value >::type >
+    : is_always_equal< allocator > {};
+
+template< typename allocator, typename target_type, typename ... sig >
+struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type, sig ... > >
+    : std::is_copy_constructible< target_type > {};
 
 DISPATCH_TABLE( allocator_erasure, target_type, ( typename allocator, typename target_type, typename ... sig ), ( allocator, target_type, sig ... ) )
 
@@ -694,7 +706,6 @@ class wrapper
         auto nontrivial = std::get< + dispatch_slot::move_constructor_destructor >( o.erasure().table );
         if ( ! nontrivial ) {
             std::memcpy( storage_address(), & o.storage, sizeof (storage) );
-            o.destroy();
         } else {
             nontrivial( std::move( o ).erasure(), storage_address(), o.any_allocator(), allocator_manager::compatible_allocator( o.erasure() ) );
         }
