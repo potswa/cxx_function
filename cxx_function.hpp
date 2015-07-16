@@ -219,7 +219,7 @@ typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::tabl
     & NAME::target_access, \
     typeid (TARGET_TYPE), \
     erasure_allocator_type< NAME >(), \
-    static_cast< typename implicit_object_to_parameter< sig >::type >( & NAME::call ) ... \
+    & std::conditional< false, sig, NAME >::type::call ... \
 };
 
 
