@@ -146,12 +146,10 @@ constexpr typename std::enable_if< erasure_trivially_movable< derived >::value >
 ( * erasure_move() ) ( erasure_handle &&, void *, void *, void * )
     { return nullptr; }
 
-template< typename erasure, typename = void >
-struct erasure_nontrivially_copyable : std::false_type {};
 template< typename erasure >
-struct erasure_nontrivially_copyable< erasure, typename std::enable_if<
+struct erasure_nontrivially_copyable : std::integral_constant< bool,
     std::is_copy_constructible< erasure >::value
-    && ! std::is_trivially_copy_constructible< erasure >::value >::type > : std::true_type {};
+    && ! std::is_trivially_copy_constructible< erasure >::value > {};
 
 template< typename derived >
 constexpr typename std::enable_if< erasure_nontrivially_copyable< derived >::value >::type
