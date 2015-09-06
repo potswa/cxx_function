@@ -95,6 +95,14 @@ int main() {
     } catch ( ctor_error & ) {}
     assert ( count_f == 1 );
     
+    f.target< throwy >()->when = 3;
+    try {
+        function< void() > g;
+        g = f;
+        abort();
+    } catch ( ctor_error & ) {}
+    assert ( count_f == 1 );
+    
     f();
     auto g = f;
     assert ( count_f == 2 );
