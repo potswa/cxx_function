@@ -548,6 +548,28 @@ protected:
         if ( ptm ) new (storage_address()) ptm_erasure< t c::*, sig ... >( ptm );
         else init( in_place_t< std::nullptr_t >{}, nullptr );
     }
+    
+    // Implement erasure type verification for always-local targets without touching RTTI.
+    bool verify_type_impl( void * ) const noexcept
+        { return & erasure().table == & null_erasure< sig ... >::table; }
+    
+    template< typename t >
+    bool verify_type_impl( std::reference_wrapper< t > * ) const noexcept
+        { return & erasure().table == & local_erasure< std::reference_wrapper< t >, sig ... >::table; }
+    
+    template< typename t >
+    bool verify_type_impl( t ** ) const noexcept
+        { return & erasure().table == & local_erasure< t *, sig ... >::table; }
+    
+    template< typename t, typename c >
+    bool verify_type_impl( t c::** ) const noexcept
+        { return & erasure().table == & ptm_erasure< t c::*, sig ... >::table; }
+    
+    // User-defined class types are never guaranteed to be local. There could exist some allocator for which uses_allocator is true.
+    // RTTI could be replaced here by a small variable template linked from the table. Since we need it anyway, just use RTTI.
+    template< typename want >
+    bool verify_type_impl( want * ) const noexcept
+        { return target_type() == typeid (want); }
 public:
     #define ERASURE_ACCESS( QUALS, UNSAFE ) \
         erasure_base< sig ... > QUALS erasure() QUALS { return reinterpret_cast< erasure_base< sig ... > QUALS >( storage ); }
@@ -556,6 +578,16 @@ public:
     
     std::type_info const & target_type() const noexcept
         { return std::get< + dispatch_slot::target_type >( erasure().table ); }
+    
+    template< typename want >
+    bool verify_type() const noexcept {
+      static_assert ( ! std::is_reference< want >::value, "function does not support reference-type targets." );
+      static_assert ( ! std::is_const< want >::value && ! std::is_volatile< want >::value, "function does not support cv-qualified targets." );
+      return verify_type_impl( (want *) nullptr );
+    }
+    
+    explicit operator void const * () const noexcept
+        { return std::get< + dispatch_slot::target_access >( erasure().table ) ( erasure() ); }
     
     template< typename want >
     want const * target() const noexcept {
@@ -567,7 +599,7 @@ public:
         { return const_cast< want * >( static_cast< wrapper_base const & >( * this ).target< want >() ); }
     
     explicit operator bool () const noexcept
-        { return target_type() != typeid (void); }
+        { return ! verify_type< void >(); }
 };
 
 struct allocator_mismatch_error : std::exception // This should be implemented in a .cpp file, but stay header-only for now.
@@ -775,7 +807,9 @@ public:
     using wrapper::wrapper_base::operator ();
     using wrapper::wrapper_base::target;
     using wrapper::wrapper_base::target_type;
+    using wrapper::wrapper_base::verify_type;
     using wrapper::wrapper_base::operator bool;
+    using wrapper::wrapper_base::operator void const *;
     
     wrapper() noexcept
         { init( in_place_t< std::nullptr_t >{}, nullptr ); }
@@ -928,7 +962,9 @@ public:
     using function::wrapper::swap;
     using function::wrapper::target;
     using function::wrapper::target_type;
+    using function::wrapper::verify_type;
     using function::wrapper::operator bool;
+    using function::wrapper::operator void const *;
     
     using function::wrapper::assign;
     using function::wrapper::emplace_assign;
@@ -955,7 +991,9 @@ public:
     using unique_function::wrapper::swap;
     using unique_function::wrapper::target;
     using unique_function::wrapper::target_type;
+    using unique_function::wrapper::verify_type;
     using unique_function::wrapper::operator bool;
+    using unique_function::wrapper::operator void const *;
     
     using unique_function::wrapper::assign;
     using unique_function::wrapper::emplace_assign;
@@ -982,7 +1020,9 @@ public:
     using function_container::wrapper::swap;
     using function_container::wrapper::target;
     using function_container::wrapper::target_type;
+    using function_container::wrapper::verify_type;
     using function_container::wrapper::operator bool;
+    using function_container::wrapper::operator void const *;
     
     using typename function_container::wrapper::allocator_type;
     using function_container::wrapper::get_allocator;
@@ -1009,7 +1049,9 @@ public:
     using unique_function_container::wrapper::swap;
     using unique_function_container::wrapper::target;
     using unique_function_container::wrapper::target_type;
+    using unique_function_container::wrapper::verify_type;
     using unique_function_container::wrapper::operator bool;
+    using unique_function_container::wrapper::operator void const *;
     
     using typename unique_function_container::wrapper::allocator_type;
     using unique_function_container::wrapper::get_allocator;
@@ -1051,6 +1093,32 @@ DEFINE_WRAPPER_OPS( unique_function_container )
 #undef DISPATCH_CVREFQ
 #undef DISPATCH_ALL
 #undef DISPATCH_TABLE
+
+#if __cplusplus >= 201402 // Return type deduction really simplifies these.
+// See proposal, "std::recover: undoing type erasure"
+
+template< typename T, typename ErasureClass >
+constexpr auto * recover( ErasureClass * e ) noexcept {
+    static_assert ( ! std::is_void< T >::value, "Recovering a void* is meaningless. Perhaps you want static_cast< void const * >( e )." );
+    // Add const qualifier to potential reference type T. References don't propagate const.
+    typedef std::conditional_t< std::is_const< ErasureClass >::value, T const, T > prop_const;
+    return e->template verify_type< T >()?
+        ( std::remove_reference_t< prop_const > * ) e->operator void const * ()
+        : nullptr;
+}
+
+struct bad_type_recovery : std::exception
+    { virtual char const * what() const noexcept override { return "An object was not found with its expected type."; } };
+
+template< typename T, typename ErasureClass >
+constexpr auto && recover( ErasureClass && e ) {
+    typedef std::conditional_t< std::is_const< std::remove_reference_t< ErasureClass > >::value, T const, T > prop_const;
+    typedef std::conditional_t< std::is_lvalue_reference< ErasureClass >::value, prop_const &, prop_const && > prop_cref;
+    if ( e.template verify_type< T >() ) {
+        return static_cast< prop_cref >( * ( typename std::decay_t< T > * ) e.operator void const * () );
+    } else throw bad_type_recovery{};
+}
+#endif
 
 }
 
