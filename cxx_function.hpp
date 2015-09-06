@@ -362,7 +362,7 @@ struct allocator_erasure
     } // The wrapper allocator instance cannot be updated following a failed initialization because the erasure allocator is already gone.
     
     template< typename ... arg >
-    explicit allocator_erasure( allocator const & in_alloc, arg && ... a )
+    allocator_erasure( std::allocator_arg_t, allocator const & in_alloc, arg && ... a )
         : allocator_erasure::erasure_base( table )
         , allocator( in_alloc )
         , target( allocator_traits::allocate( alloc(), 1 ) )
@@ -370,17 +370,11 @@ struct allocator_erasure
     
     // Move-construct into a different pool.
     allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure && o )
-        : allocator_erasure::erasure_base( table )
-        , allocator( dest_allocator )
-        , target( allocator_traits::allocate( alloc(), 1 ) )
-        { construct_safely( std::move( * o.target ) ); }
+        : allocator_erasure( std::allocator_arg, dest_allocator, std::move( * o.target ) ) {}
     
     // Common case: copy-construct with any allocator, same or different.
     allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure const & o )
-        : allocator_erasure::erasure_base( table )
-        , allocator( dest_allocator )
-        , target( allocator_traits::allocate( alloc(), 1 ) )
-        { construct_safely( * o.target ); }
+        : allocator_erasure( std::allocator_arg, dest_allocator, * o.target ) {}
     
     void move( std::true_type, void * dest, void *, void * ) noexcept { // Call ordinary move constructor.
         new (dest) allocator_erasure( std::move( * this ) ); // Move the pointer, not the object. Don't call the allocator at all.
@@ -785,7 +779,7 @@ class wrapper
         static_assert ( is_allocator_erasure< erasure >::value, "" );
         // TODO: Add a new erasure template to put the fancy pointer on the heap.
         static_assert ( sizeof (erasure) <= sizeof storage, "Stateful allocator or fancy pointer is too big for polymorphic function wrapper." );
-        new (storage_address()) erasure( alloc, std::forward< arg >( a ) ... );
+        new (storage_address()) erasure( std::allocator_arg, alloc, std::forward< arg >( a ) ... );
     }
     template< typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
@@ -1119,15 +1113,6 @@ constexpr auto && recover( ErasureClass && e ) {
     } else throw bad_type_recovery{};
 }
 #endif
-
-}
-
-namespace std {
-
-template< typename ... sig, typename alloc >
-struct uses_allocator< cxx_function::function< sig ... >, alloc > : true_type {};
-template< typename ... sig, typename alloc >
-struct uses_allocator< cxx_function::unique_function< sig ... >, alloc > : true_type {};
 
 }
 
