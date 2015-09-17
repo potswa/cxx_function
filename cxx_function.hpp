@@ -224,7 +224,7 @@ typename erasure_base< sig ... >::dispatch_table const NAME< UNPACK TARG >::tabl
 // Implement the uninitialized state.
 DISPATCH_BASE_CASE( null )
 #define NULL_CASE( QUALS, UNSAFE ) ERASURE_DISPATCH_CASE( QUALS, null, \
-    (void) sizeof ... (a); (void) self; throw std::bad_function_call{}; \
+    (void) sizeof ... (a); (void) & self; throw std::bad_function_call{}; \
 )
 DISPATCH_ALL( NULL_CASE )
 #undef NULL_CASE
@@ -575,24 +575,29 @@ public:
     
     template< typename want >
     bool verify_type() const noexcept {
-      static_assert ( ! std::is_reference< want >::value, "function does not support reference-type targets." );
-      static_assert ( ! std::is_const< want >::value && ! std::is_volatile< want >::value, "function does not support cv-qualified targets." );
-      return verify_type_impl( (want *) nullptr );
+        static_assert ( ! std::is_reference< want >::value, "function does not support reference-type targets." );
+        static_assert ( ! std::is_const< want >::value && ! std::is_volatile< want >::value, "function does not support cv-qualified targets." );
+        return verify_type_impl( (want *) nullptr );
     }
+    template< typename want >
+    bool verify_type() const volatile noexcept
+        { return const_cast< wrapper_base const * >( this )->verify_type< want >(); }
     
-    explicit operator void const * () const noexcept
+    void const * complete_object_address() const noexcept
         { return std::get< + dispatch_slot::target_access >( erasure().table ) ( erasure() ); }
+    void const volatile * complete_object_address() const volatile noexcept
+        { return const_cast< wrapper_base const * >( this )->complete_object_address(); }
     
     template< typename want >
     want const * target() const noexcept {
-        if ( typeid (want) != target_type() ) return nullptr;
+        if ( ! verify_type< want >() ) return nullptr;
         return static_cast< want const * >( std::get< + dispatch_slot::target_access >( erasure().table ) ( erasure() ) );
     }
     template< typename want >
     want * target() noexcept
         { return const_cast< want * >( static_cast< wrapper_base const & >( * this ).target< want >() ); }
     
-    explicit operator bool () const noexcept
+    explicit operator bool () const volatile noexcept
         { return ! verify_type< void >(); }
 };
 
@@ -803,7 +808,7 @@ public:
     using wrapper::wrapper_base::target_type;
     using wrapper::wrapper_base::verify_type;
     using wrapper::wrapper_base::operator bool;
-    using wrapper::wrapper_base::operator void const *;
+    using wrapper::wrapper_base::complete_object_address;
     
     wrapper() noexcept
         { init( in_place_t< std::nullptr_t >{}, nullptr ); }
@@ -958,7 +963,7 @@ public:
     using function::wrapper::target_type;
     using function::wrapper::verify_type;
     using function::wrapper::operator bool;
-    using function::wrapper::operator void const *;
+    using function::wrapper::complete_object_address;
     
     using function::wrapper::assign;
     using function::wrapper::emplace_assign;
@@ -987,7 +992,7 @@ public:
     using unique_function::wrapper::target_type;
     using unique_function::wrapper::verify_type;
     using unique_function::wrapper::operator bool;
-    using unique_function::wrapper::operator void const *;
+    using unique_function::wrapper::complete_object_address;
     
     using unique_function::wrapper::assign;
     using unique_function::wrapper::emplace_assign;
@@ -1016,7 +1021,7 @@ public:
     using function_container::wrapper::target_type;
     using function_container::wrapper::verify_type;
     using function_container::wrapper::operator bool;
-    using function_container::wrapper::operator void const *;
+    using function_container::wrapper::complete_object_address;
     
     using typename function_container::wrapper::allocator_type;
     using function_container::wrapper::get_allocator;
@@ -1045,7 +1050,7 @@ public:
     using unique_function_container::wrapper::target_type;
     using unique_function_container::wrapper::verify_type;
     using unique_function_container::wrapper::operator bool;
-    using unique_function_container::wrapper::operator void const *;
+    using unique_function_container::wrapper::complete_object_address;
     
     using typename unique_function_container::wrapper::allocator_type;
     using unique_function_container::wrapper::get_allocator;
@@ -1091,25 +1096,37 @@ DEFINE_WRAPPER_OPS( unique_function_container )
 #if __cplusplus >= 201402 // Return type deduction really simplifies these.
 // See proposal, "std::recover: undoing type erasure"
 
-template< typename T, typename ErasureClass >
-constexpr auto * recover( ErasureClass * e ) noexcept {
-    static_assert ( ! std::is_void< T >::value, "Recovering a void* is meaningless. Perhaps you want static_cast< void const * >( e )." );
+template< typename erasure >
+void const * recover_address( erasure & e, std::false_type )
+    { return e.complete_object_address(); }
+
+template< typename erasure >
+void const * recover_address( erasure & e, std::true_type )
+    { return e.referent_address(); }
+
+template< typename want, typename erasure >
+constexpr auto * recover( erasure * e ) noexcept {
+    static_assert ( ! std::is_void< want >::value, "Recovering a void* is meaningless. Perhaps you want static_cast< void const * >( e )." );
     // Add const qualifier to potential reference type T. References don't propagate const.
-    typedef std::conditional_t< std::is_const< ErasureClass >::value, T const, T > prop_const;
-    return e->template verify_type< T >()?
-        ( std::remove_reference_t< prop_const > * ) e->operator void const * ()
+    typedef std::conditional_t< std::is_const< erasure >::value, want const, want > prop_const;
+    typedef std::conditional_t< std::is_volatile< erasure >::value, prop_const volatile, prop_const > prop_cv;
+    typedef std::remove_reference_t< prop_cv > cv_object;
+    return e->template verify_type< want >()?
+        ( cv_object * ) recover_address( e, std::is_reference< want >{} )
         : nullptr;
 }
 
 struct bad_type_recovery : std::exception
     { virtual char const * what() const noexcept override { return "An object was not found with its expected type."; } };
 
-template< typename T, typename ErasureClass >
-constexpr auto && recover( ErasureClass && e ) {
-    typedef std::conditional_t< std::is_const< std::remove_reference_t< ErasureClass > >::value, T const, T > prop_const;
-    typedef std::conditional_t< std::is_lvalue_reference< ErasureClass >::value, prop_const &, prop_const && > prop_cref;
-    if ( e.template verify_type< T >() ) {
-        return static_cast< prop_cref >( * ( typename std::decay_t< T > * ) e.operator void const * () );
+template< typename want, typename erasure_ref >
+constexpr auto && recover( erasure_ref && e ) {
+    typedef std::remove_reference_t< erasure_ref > erasure;
+    typedef std::conditional_t< std::is_const< erasure >::value, want const, want > prop_const;
+    typedef std::conditional_t< std::is_volatile< erasure >::value, prop_const volatile, prop_const > prop_cv;
+    typedef std::conditional_t< std::is_lvalue_reference< erasure_ref >::value, prop_cv &, prop_cv && > prop_cvref;
+    if ( e.template verify_type< want >() ) {
+        return static_cast< prop_cvref >( * ( std::decay_t< want > * ) e.complete_object_address () );
     } else throw bad_type_recovery{};
 }
 #endif
