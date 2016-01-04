@@ -73,4 +73,15 @@ int main() {
     assert ( q.get_allocator().total() == 5 );
     assert ( global_total == 10 );
     q = [q] { return q.get_allocator(); };
+    assert ( q.get_allocator().total() == sizeof (q) );
+    assert ( global_total == 10 + sizeof (q) );
+    cxx_function::function< accounting() > f;
+    f = q;
+    assert ( q.get_allocator().total() == sizeof (q) );
+    assert ( global_total == 15 + 2 * sizeof (q) );
+    
+    f.assign( five, q.get_allocator() );
+    assert ( q.get_allocator().total() == 5 + sizeof (q) );
+    
+    q = f;
 }
