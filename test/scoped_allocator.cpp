@@ -102,8 +102,8 @@ int main() {
     assert ( pool[ 2 ] == op.state.capacity() + 1 + sizeof (stateful_op) );
     {
         std::map< int, function< void() >, std::less< int >, fct::allocator_type > m( pool_alloc< char >{ 3 } );
-    
-        #if __clang__
+        
+        #if __clang__ || __GNUC__ >= 5
         m[ 42 ].assign( fv, m.get_allocator() );
         #else
         m.insert( std::make_pair( 42, fv ) );
