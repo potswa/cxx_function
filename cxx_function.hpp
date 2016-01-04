@@ -1105,18 +1105,6 @@ template< typename erasure >
 void const * recover_address( erasure & e, std::true_type )
     { return e.referent_address(); }
 
-template< typename want, typename erasure >
-constexpr auto * recover( erasure * e ) noexcept {
-    static_assert ( ! std::is_void< want >::value, "Recovering a void* is meaningless. Perhaps you want static_cast< void const * >( e )." );
-    // Add const qualifier to potential reference type T. References don't propagate const.
-    typedef std::conditional_t< std::is_const< erasure >::value, want const, want > prop_const;
-    typedef std::conditional_t< std::is_volatile< erasure >::value, prop_const volatile, prop_const > prop_cv;
-    typedef std::remove_reference_t< prop_cv > cv_object;
-    return e->template verify_type< want >()?
-        ( cv_object * ) recover_address( e, std::is_reference< want >{} )
-        : nullptr;
-}
-
 struct bad_type_recovery : std::exception
     { virtual char const * what() const noexcept override { return "An object was not found with its expected type."; } };
 
@@ -1127,7 +1115,7 @@ constexpr auto && recover( erasure_ref && e ) {
     typedef std::conditional_t< std::is_volatile< erasure >::value, prop_const volatile, prop_const > prop_cv;
     typedef std::conditional_t< std::is_lvalue_reference< erasure_ref >::value, prop_cv &, prop_cv && > prop_cvref;
     if ( e.template verify_type< want >() ) {
-        return static_cast< prop_cvref >( * ( std::decay_t< want > * ) e.complete_object_address () );
+        return static_cast< prop_cvref >( * ( std::decay_t< want > * ) recover_address( e, std::is_reference< want >{} ) );
     } else throw bad_type_recovery{};
 }
 #endif
