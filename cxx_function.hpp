@@ -615,7 +615,7 @@ class wrapper_allocator
     void do_swap( std::false_type, wrapper_allocator & o ) noexcept
         { assert ( actual_allocator() == o.actual_allocator() && "Cannot swap containers while not-swapping their unequal allocators." ); } // Roughly match libc++.
 protected:
-    wrapper_allocator( wrapper_allocator && ) noexcept = default;
+    wrapper_allocator( wrapper_allocator && ) /*noexcept*/ = default;
     
     /*  Do select_on_container_copy_construction here, although the "container" is really represented
         by the set of all equivalent allocators in various independent target objects. */
