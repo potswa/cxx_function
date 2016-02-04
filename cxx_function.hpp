@@ -28,6 +28,17 @@ constexpr in_place_t< t > in_place = {};
 
 namespace impl {
 
+#ifdef _MSC_VER
+template< typename t >
+using id_t = t; // Help parser put decltype-id in a nested-name-specifier.
+
+#   define MSVC_FIX(...) __VA_ARGS__
+#   define MSVC_SKIP(...)
+#else
+#   define MSVC_FIX(...)
+#   define MSVC_SKIP(...) __VA_ARGS__
+#endif
+
 #define DISPATCH_CQ( MACRO, UNSAFE, QUALS ) MACRO( QUALS, UNSAFE ) MACRO( const QUALS, IGNORE )
 #define DISPATCH_CV( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, IGNORE, volatile QUALS )
 
@@ -329,11 +340,13 @@ template< typename t >
 struct is_always_equal< t, void, typename std::enable_if< std::allocator_traits< t >::is_always_equal::value >::type >
     : std::true_type {};
 template< typename t, typename v >
-struct is_always_equal< t, v, typename std::enable_if< decltype (std::declval< t >() == std::declval< t >())::value >::type >
+struct is_always_equal< t, v, typename std::enable_if< MSVC_FIX(id_t<) decltype (std::declval< t >() == std::declval< t >()) MSVC_FIX(>)::value >::type >
     : std::true_type {};
+MSVC_SKIP ( // MSVC implements is_always_equal and fails to see <allocator<t>,void,void> as more specialized than <t,void,void>.
 template< typename t >
 struct is_always_equal< std::allocator< t > >
     : std::true_type {};
+)
 
 template< typename allocator, typename target_type, typename ... sig >
 struct allocator_erasure
@@ -395,7 +408,7 @@ struct allocator_erasure
     static void move( erasure_handle && self_base, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure & >( self_base );
         // is_always_equal is usually false here, because it correlates with triviality which short-circuits this function.
-        std::move( self ).move( is_always_equal< allocator >{}, dest, source_allocator_v, dest_allocator_v );
+        std::move( self ).move( MSVC_FIX(impl::)is_always_equal< allocator >{}, dest, source_allocator_v, dest_allocator_v );
     }
     static void copy( erasure_handle const & self_base, void * dest, void * dest_allocator_v ) {
         auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v );
@@ -565,6 +578,8 @@ protected:
     bool verify_type_impl( want * ) const noexcept
         { return target_type() == typeid (want); }
 public:
+    MSVC_FIX( using wrapper_dispatch::operator(); ) // MSVC has trouble in derived classes with indirect inheritance.
+    
     #define ERASURE_ACCESS( QUALS, UNSAFE ) \
         erasure_base< sig ... > QUALS erasure() QUALS { return reinterpret_cast< erasure_base< sig ... > QUALS >( storage ); }
     DISPATCH_CVREFQ( ERASURE_ACCESS, )
@@ -700,32 +715,37 @@ protected:
 template< template< typename ... > class is_targetable, typename allocator_manager, typename ... sig >
 class wrapper
     : public allocator_manager
-    , wrapper_base< sig ... > {
+    , MSVC_FIX(protected) wrapper_base< sig ... > {
     template< template< typename ... > class, typename, typename ... >
     friend class wrapper;
     
+    MSVC_SKIP ( // MSVC can't resolve an inherited injected-class-name nested-name-specifier, and doesn't need these.
+    using wrapper::wrapper_base::erasure;
     using wrapper::wrapper_base::storage;
     using wrapper::wrapper_base::storage_address;
-    using wrapper::wrapper_base::init;
+    )
+    using MSVC_SKIP(wrapper::)wrapper_base::init;
     
     // Queries on potential targets.
     template< typename source, typename allocator = typename allocator_manager::allocator_t >
     struct is_small {
-        static const bool value = sizeof (local_erasure< source, sig ... >) <= sizeof (storage)
-            && alignof (source) <= alignof (decltype (storage))
+        static const bool value = sizeof (local_erasure< source, sig ... >) <= sizeof (MSVC_FIX(wrapper_base::)storage)
+            && alignof (source) <= alignof (decltype (MSVC_FIX(wrapper_base::)storage))
             && ! std::uses_allocator< source, allocator >::value
             && std::is_nothrow_move_constructible< source >::value;
     };
+    template< typename allocator >
+    struct is_small< std::nullptr_t, allocator >
+        : std::true_type {};
     
-    template< typename, typename = void >
+    template< typename, typename = MSVC_SKIP(typename wrapper::)wrapper_base >
     struct is_compatibly_wrapped : std::false_type
         { static const bool with_compatible_allocation = false; };
     template< typename source >
-    struct is_compatibly_wrapped< source, typename std::enable_if<
-            std::is_same< typename wrapper::wrapper_base, typename source::wrapper_base >::value >::type >
+    struct is_compatibly_wrapped< source, typename source::wrapper_base >
         : std::true_type {
         static const bool with_compatible_allocation = allocator_manager::noexcept_move_adopt
-            || std::is_same< typename wrapper::allocator_t, typename source::wrapper::allocator_t >::value;
+            || std::is_same< MSVC_SKIP(typename wrapper::)allocator_t, typename source::wrapper::allocator_t >::value;
     };
     
     // Adopt by move.
@@ -735,7 +755,7 @@ class wrapper
         typename source::wrapper & o = s;
         auto nontrivial = std::get< + dispatch_slot::move_constructor_destructor >( o.erasure().table );
         if ( ! nontrivial ) {
-            std::memcpy( storage_address(), & o.storage, sizeof (storage) );
+            std::memcpy( & erasure(), & o.erasure(), sizeof (storage) );
         } else {
             nontrivial( std::move( o ).erasure(), storage_address(), o.any_allocator(), allocator_manager::compatible_allocator( o.erasure() ) );
         }
@@ -747,7 +767,7 @@ class wrapper
     init( in_place_t< source >, source const & s ) {
         typename wrapper::wrapper_base const & o = s;
         auto nontrivial = std::get< + dispatch_slot::copy_constructor >( o.erasure().table );
-        if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
+        if ( ! nontrivial ) std::memcpy( & erasure(), & o.storage, sizeof (storage) );
         else nontrivial( o.erasure(), storage_address(), allocator_manager::compatible_allocator( o.erasure() ) );
     }
     
@@ -772,7 +792,7 @@ class wrapper
     
     // Local erasures.
     template< typename source, typename ... arg >
-    typename std::enable_if< is_small< source >::value >::type
+    typename std::enable_if< is_small< source >::value MSVC_FIX( && ! is_noexcept_erasable< source >::value ) >::type
     init( in_place_t< source >, arg && ... a )
         { new (storage_address()) local_erasure< source, sig ... >( std::forward< arg >( a ) ... ); }
     
@@ -804,12 +824,12 @@ class wrapper
         if ( nontrivial ) nontrivial( this->erasure(), allocator_manager::any_allocator() );
     }
 public:
-    using wrapper::wrapper_base::operator ();
-    using wrapper::wrapper_base::target;
-    using wrapper::wrapper_base::target_type;
-    using wrapper::wrapper_base::verify_type;
-    using wrapper::wrapper_base::operator bool;
-    using wrapper::wrapper_base::complete_object_address;
+    using MSVC_SKIP(wrapper::)wrapper_base::operator ();
+    using MSVC_SKIP(wrapper::)wrapper_base::target;
+    using MSVC_SKIP(wrapper::)wrapper_base::target_type;
+    using MSVC_SKIP(wrapper::)wrapper_base::verify_type;
+    MSVC_SKIP ( using MSVC_SKIP(wrapper::)wrapper_base::operator bool; )
+    using MSVC_SKIP(wrapper::)wrapper_base::complete_object_address;
     
     wrapper() noexcept
         { init( in_place_t< std::nullptr_t >{}, nullptr ); }
@@ -949,26 +969,35 @@ class function
     template< template< typename ... > class, typename, typename ... >
     friend class impl::wrapper;
 public:
-    using function::wrapper::wrapper;
-    
+    MSVC_SKIP( using function::wrapper::wrapper; )
+    MSVC_FIX(
+    template< typename ... arg,
+        typename std::enable_if<
+            std::is_constructible< wrapper, arg ... >::value
+        >::type * = nullptr >
+    function( arg && ... a )
+        : wrapper( std::forward< arg >( a ) ... ) {}
+    )
+    MSVC_SKIP (
     function() noexcept = default; // Investigate why these are needed. Compiler bug?
     function( function && s ) noexcept = default;
     function( function const & ) = default;
     function & operator = ( function && s ) noexcept = default;
     function & operator = ( function const & o ) = default;
+    )
     
-    using function::wrapper::operator ();
-    using function::wrapper::operator =;
-    using function::wrapper::swap;
-    using function::wrapper::target;
-    using function::wrapper::target_type;
-    using function::wrapper::verify_type;
-    using function::wrapper::operator bool;
-    using function::wrapper::complete_object_address;
+    using MSVC_SKIP(function::)wrapper::operator ();
+    using MSVC_SKIP(function::)wrapper::operator =;
+    void swap( function & o ) { this->MSVC_SKIP(function::)wrapper::swap( o ); }
+    using MSVC_SKIP(function::)wrapper::target;
+    using MSVC_SKIP(function::)wrapper::target_type;
+    using MSVC_SKIP(function::)wrapper::verify_type;
+    using MSVC_SKIP(function::)wrapper::operator bool;
+    using MSVC_SKIP(function::)wrapper::complete_object_address;
     
-    using function::wrapper::assign;
-    using function::wrapper::emplace_assign;
-    using function::wrapper::allocate_assign;
+    using MSVC_SKIP(function::)wrapper::assign;
+    using MSVC_SKIP(function::)wrapper::emplace_assign;
+    using MSVC_SKIP(function::)wrapper::allocate_assign;
     // No allocator_type or get_allocator.
 };
 
@@ -978,26 +1007,33 @@ class unique_function
     template< template< typename ... > class, typename, typename ... >
     friend class impl::wrapper;
 public:
-    using unique_function::wrapper::wrapper;
-    
-    unique_function() noexcept = default;
+    MSVC_SKIP( using unique_function::wrapper::wrapper; )
+    MSVC_FIX(
+    template< typename ... arg,
+        typename std::enable_if<
+            std::is_constructible< wrapper, arg ... >::value
+        >::type * = nullptr >
+    unique_function( arg && ... a )
+        : wrapper( std::forward< arg >( a ) ... ) {}
+    )
+    MSVC_SKIP( unique_function() noexcept = default; )
     unique_function( unique_function && s ) noexcept = default;
     unique_function( unique_function const & ) = delete;
     unique_function & operator = ( unique_function && s ) noexcept = default;
     unique_function & operator = ( unique_function const & o ) = delete;
     
-    using unique_function::wrapper::operator ();
-    using unique_function::wrapper::operator =;
-    using unique_function::wrapper::swap;
-    using unique_function::wrapper::target;
-    using unique_function::wrapper::target_type;
-    using unique_function::wrapper::verify_type;
-    using unique_function::wrapper::operator bool;
-    using unique_function::wrapper::complete_object_address;
+    using MSVC_SKIP(unique_function::)wrapper::operator ();
+    using MSVC_SKIP(unique_function::)wrapper::operator =;
+    void swap( unique_function & o ) { this->MSVC_SKIP(unique_function::)wrapper::swap( o ); }
+    using MSVC_SKIP(unique_function::)wrapper::target;
+    using MSVC_SKIP(unique_function::)wrapper::target_type;
+    using MSVC_SKIP(unique_function::)wrapper::verify_type;
+    using MSVC_SKIP(unique_function::)wrapper::operator bool;
+    using MSVC_SKIP(unique_function::)wrapper::complete_object_address;
     
-    using unique_function::wrapper::assign;
-    using unique_function::wrapper::emplace_assign;
-    using unique_function::wrapper::allocate_assign;
+    using MSVC_SKIP(unique_function::)wrapper::assign;
+    using MSVC_SKIP(unique_function::)wrapper::emplace_assign;
+    using MSVC_SKIP(unique_function::)wrapper::allocate_assign;
     // No allocator_type or get_allocator.
 };
 
@@ -1007,26 +1043,35 @@ class function_container
     template< template< typename ... > class, typename, typename ... >
     friend class impl::wrapper;
 public:
-    using function_container::wrapper::wrapper;
-    
+    MSVC_SKIP( using function_container::wrapper::wrapper; )
+    MSVC_FIX(
+    template< typename ... arg,
+        typename std::enable_if<
+            std::is_constructible< wrapper, arg ... >::value
+        >::type * = nullptr >
+    function_container( arg && ... a )
+        : wrapper( std::forward< arg >( a ) ... ) {}
+    )
+    MSVC_SKIP (
     function_container() noexcept = default; // Investigate why these are needed. Compiler bug?
     function_container( function_container && s ) noexcept = default;
     function_container( function_container const & ) = default;
-    function_container & operator = ( function_container && s ) = default;
+    function_container & operator = ( function_container && s ) noexcept = default;
     function_container & operator = ( function_container const & o ) = default;
+    )
     
-    using function_container::wrapper::operator ();
-    using function_container::wrapper::operator =;
-    using function_container::wrapper::swap;
-    using function_container::wrapper::target;
-    using function_container::wrapper::target_type;
-    using function_container::wrapper::verify_type;
-    using function_container::wrapper::operator bool;
-    using function_container::wrapper::complete_object_address;
+    using MSVC_SKIP(function_container::)wrapper::operator ();
+    using MSVC_SKIP(function_container::)wrapper::operator =;
+    void swap( function_container & o ) { this->MSVC_SKIP(function_container::)wrapper::swap( o ); }
+    using MSVC_SKIP(function_container::)wrapper::target;
+    using MSVC_SKIP(function_container::)wrapper::target_type;
+    using MSVC_SKIP(function_container::)wrapper::verify_type;
+    using MSVC_SKIP(function_container::)wrapper::operator bool;
+    using MSVC_SKIP(function_container::)wrapper::complete_object_address;
     
-    typedef typename function_container::wrapper::allocator_t allocator_type;
-    using function_container::wrapper::get_allocator;
-    using function_container::wrapper::emplace_assign;
+    typedef typename MSVC_SKIP(function_container::)wrapper::allocator_t allocator_type;
+    using MSVC_SKIP(function_container::)wrapper::get_allocator;
+    using MSVC_SKIP(function_container::)wrapper::emplace_assign;
     // No assign or allocate_assign.
 };
 
@@ -1036,7 +1081,15 @@ class unique_function_container
     template< template< typename ... > class, typename, typename ... >
     friend class impl::wrapper;
 public:
-    using unique_function_container::wrapper::wrapper;
+    MSVC_SKIP( using unique_function_container::wrapper::wrapper; )
+    MSVC_FIX(
+    template< typename ... arg,
+        typename std::enable_if<
+            std::is_constructible< wrapper, arg ... >::value
+        >::type * = nullptr >
+    unique_function_container( arg && ... a )
+        : wrapper( std::forward< arg >( a ) ... ) {}
+    )
     
     unique_function_container() noexcept = default;
     unique_function_container( unique_function_container && s ) noexcept = default;
@@ -1046,7 +1099,7 @@ public:
     
     using unique_function_container::wrapper::operator ();
     using unique_function_container::wrapper::operator =;
-    using unique_function_container::wrapper::swap;
+    void swap( unique_function_container & o ) { this->MSVC_SKIP(unique_function_container::)wrapper::swap( o ); }
     using unique_function_container::wrapper::target;
     using unique_function_container::wrapper::target_type;
     using unique_function_container::wrapper::verify_type;
@@ -1119,6 +1172,9 @@ constexpr auto && recover( erasure_ref && e ) {
     } else throw bad_type_recovery{};
 }
 #endif
+
+#undef MSVC_SKIP
+#undef MSVC_FIX
 
 }
 
