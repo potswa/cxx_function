@@ -39,6 +39,17 @@ using id_t = t; // Help parser put decltype-id in a nested-name-specifier.
 #   define MSVC_SKIP(...) __VA_ARGS__
 #endif
 
+#ifdef _MSC_VER
+template< typename t >
+using id_t = t; // Help parser put decltype-id in a nested-name-specifier.
+
+#   define MSVC_FIX(...) __VA_ARGS__
+#   define MSVC_SKIP(...)
+#else
+#   define MSVC_FIX(...)
+#   define MSVC_SKIP(...) __VA_ARGS__
+#endif
+
 #define DISPATCH_CQ( MACRO, UNSAFE, QUALS ) MACRO( QUALS, UNSAFE ) MACRO( const QUALS, IGNORE )
 #define DISPATCH_CV( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, IGNORE, volatile QUALS )
 
@@ -729,7 +740,8 @@ class wrapper
     // Queries on potential targets.
     template< typename source, typename allocator = typename allocator_manager::allocator_t >
     struct is_small {
-        static const bool value = sizeof (local_erasure< source, sig ... >) <= sizeof (MSVC_FIX(wrapper_base::)storage)
+        static const bool value = sizeof (local_erasure< source, typename implicit_object_to_parameter< sig >::type ... >)
+                <= sizeof (MSVC_FIX(wrapper_base::)storage)
             && alignof (source) <= alignof (decltype (MSVC_FIX(wrapper_base::)storage))
             && ! std::uses_allocator< source, allocator >::value
             && std::is_nothrow_move_constructible< source >::value;
