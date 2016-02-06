@@ -143,12 +143,10 @@ constexpr typename std::enable_if<
 ( * erasure_destroy() ) ( erasure_handle &, void * )
     { return nullptr; }
 
-template< typename erasure, typename = void >
-struct erasure_trivially_movable : std::false_type {};
 template< typename erasure >
-struct erasure_trivially_movable< erasure, typename std::enable_if<
-    std::is_trivially_constructible< erasure, erasure >::value
-    && std::is_trivially_destructible< erasure >::value >::type > : std::true_type {};
+struct erasure_trivially_movable : std::integral_constant< bool,
+    std::is_trivially_constructible< erasure, erasure && >::value
+    && std::is_trivially_destructible< erasure >::value > {};
 
 template< typename derived >
 constexpr typename std::enable_if< ! erasure_trivially_movable< derived >::value >::type
@@ -322,6 +320,9 @@ struct allocator_erasure
         throw;
     } // The wrapper allocator instance cannot be updated following a failed initialization because the erasure allocator is already gone.
     
+    allocator_erasure( allocator_erasure && ) = default;
+    allocator_erasure( allocator_erasure const & ) = delete;
+    
     template< typename ... arg >
     allocator_erasure( std::allocator_arg_t, allocator const & in_alloc, arg && ... a )
         : allocator_erasure::erasure_base( table )
@@ -380,10 +381,10 @@ template< typename allocator, typename target_type, typename ... sig >
 struct is_allocator_erasure< allocator_erasure< allocator, target_type, sig ... > > : std::true_type {};
 
 template< typename allocator, typename target_type, typename ... sig >
-struct erasure_trivially_movable< allocator_erasure< allocator, target_type, sig ... >, typename std::enable_if<
-    std::is_trivially_constructible< allocator_erasure< allocator, target_type, sig ... >, allocator_erasure< allocator, target_type, sig ... > >::value
-    && std::is_trivially_destructible< allocator_erasure< allocator, target_type, sig ... > >::value >::type >
-    : is_always_equal< allocator > {};
+struct erasure_trivially_movable< allocator_erasure< allocator, target_type, sig ... > > : std::integral_constant< bool,
+    std::is_trivially_constructible< allocator_erasure< allocator, target_type, sig ... >, allocator_erasure< allocator, target_type, sig ... > && >::value
+    && std::is_trivially_destructible< allocator_erasure< allocator, target_type, sig ... > >::value
+    && is_always_equal< allocator >::value > {};
 
 template< typename allocator, typename target_type, typename ... sig >
 struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type, sig ... > >
