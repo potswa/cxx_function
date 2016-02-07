@@ -52,6 +52,8 @@ For `std::function` documentation, see [cppreference.com](http://en.cppreference
 or a [recent C++ draft standard](http://open-std.org/jtc1/sc22/wg21/docs/papers/2015/n4527.pdf). Only new features are
 described here.
 
+This library is tested against Clang 3.6 (with libc++ and libstdc++) and GCC 5.1 (with libstdc++) on OS X.
+There is a separate [branch](tree/msvc_port) tested against VS2015. Please [report](#bugs) bugs.
 
 ## Overloaded functions
 
