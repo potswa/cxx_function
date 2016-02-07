@@ -35,6 +35,10 @@ namespace impl {
 template< typename t >
 using id_t = t; // Help parser put decltype-id in a nested-name-specifier.
 
+typedef std::allocator< char > stdallocchar;
+#   define allocator cxx_function_allocator // MSVC name lookup is horribly broken.
+#   define alloc cxx_function_alloc // Any template parameter names that might collide with a member of any namespace should go here.
+
 #   define MSVC_FIX(...) __VA_ARGS__
 #   define MSVC_SKIP(...)
 #else
@@ -311,28 +315,28 @@ struct is_always_equal< std::allocator< t > >
     : std::true_type {};
 )
 
-template< typename alloc, typename target_type, typename ... sig >
+template< typename allocator, typename target_type, typename ... sig >
 struct allocator_erasure
     : erasure_base< sig ... >
-    , alloc { // empty base class optimization (EBCO)
-    typedef std::allocator_traits< alloc > allocator_traits;
-    typedef common_allocator_rebind< alloc > common_allocator;
+    , allocator { // empty base class optimization (EBCO)
+    typedef std::allocator_traits< allocator > allocator_traits;
+    typedef common_allocator_rebind< allocator > common_allocator;
     
     static const typename erasure_base< sig ... >::dispatch_table table;
     
     typename allocator_traits::pointer target;
     
-    alloc & get_allocator() { return static_cast< alloc & >( * this ); }
-    alloc const & get_allocator() const { return static_cast< alloc const & >( * this ); }
+    allocator & alloc() { return static_cast< allocator & >( * this ); }
+    allocator const & alloc() const { return static_cast< allocator const & >( * this ); }
     target_type * target_address() { return std::addressof( * target ); }
     static void const * target_access( erasure_handle const & self )
         { return std::addressof( * static_cast< allocator_erasure const & >( self ).target ); }
     
     template< typename ... arg >
     void construct_safely( arg && ... a ) try {
-        allocator_traits::construct( get_allocator(), target_address(), std::forward< arg >( a ) ... );
+        allocator_traits::construct( alloc(), target_address(), std::forward< arg >( a ) ... );
     } catch (...) {
-        allocator_traits::deallocate( get_allocator(), target, 1 ); // Does not throw according to [allocator.requirements] §17.6.3.5 and DR2384.
+        allocator_traits::deallocate( alloc(), target, 1 ); // Does not throw according to [allocator.requirements] §17.6.3.5 and DR2384.
         throw;
     } // The wrapper allocator instance cannot be updated following a failed initialization because the erasure allocator is already gone.
     
@@ -340,18 +344,18 @@ struct allocator_erasure
     allocator_erasure( allocator_erasure const & ) = delete;
     
     template< typename ... arg >
-    allocator_erasure( std::allocator_arg_t, alloc const & in_alloc, arg && ... a )
+    allocator_erasure( std::allocator_arg_t, allocator const & in_alloc, arg && ... a )
         : allocator_erasure::erasure_base( table )
-        , alloc( in_alloc )
-        , target( allocator_traits::allocate( get_allocator(), 1 ) )
+        , allocator( in_alloc )
+        , target( allocator_traits::allocate( alloc(), 1 ) )
         { construct_safely( std::forward< arg >( a ) ... ); }
     
     // Move-construct into a different pool.
-    allocator_erasure( std::allocator_arg_t, alloc const & dest_allocator, allocator_erasure && o )
+    allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure && o )
         : allocator_erasure( std::allocator_arg, dest_allocator, std::move( * o.target ) ) {}
     
     // Common case: copy-construct with any allocator, same or different.
-    allocator_erasure( std::allocator_arg_t, alloc const & dest_allocator, allocator_erasure const & o )
+    allocator_erasure( std::allocator_arg_t, allocator const & dest_allocator, allocator_erasure const & o )
         : allocator_erasure( std::allocator_arg, dest_allocator, * o.target ) {}
     
     void move( std::true_type, void * dest, void *, void * ) noexcept { // Call ordinary move constructor.
@@ -360,12 +364,12 @@ struct allocator_erasure
     }
     void move( std::false_type, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
         auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v ); // The wrapper verified the safety of this using typeid.
-        if ( ! dest_allocator_p || * dest_allocator_p == get_allocator() ) {
+        if ( ! dest_allocator_p || * dest_allocator_p == alloc() ) {
             move( std::true_type{}, dest, source_allocator_v, dest_allocator_v ); // same pool
         } else { // different pool
-            auto & e = * new (dest) allocator_erasure( std::allocator_arg, static_cast< alloc >( * dest_allocator_p ), // Reallocate.
+            auto & e = * new (dest) allocator_erasure( std::allocator_arg, static_cast< allocator >( * dest_allocator_p ), // Reallocate.
                 std::move_if_noexcept( * this ) ); // Protect user against their own throwing move constructors.
-            * dest_allocator_p = e.get_allocator(); // Update the wrapper allocator instance with the new copy, potentially updated by the new allocation.
+            * dest_allocator_p = e.alloc(); // Update the wrapper allocator instance with the new copy, potentially updated by the new allocation.
             destroy( * this, source_allocator_v );
         }
     }
@@ -373,40 +377,40 @@ struct allocator_erasure
     static void move( erasure_handle && self_base, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure & >( self_base );
         // is_always_equal is usually false here, because it correlates with triviality which short-circuits this function.
-        std::move( self ).move( MSVC_FIX(impl::)is_always_equal< alloc >{}, dest, source_allocator_v, dest_allocator_v );
+        std::move( self ).move( MSVC_FIX(impl::)is_always_equal< allocator >{}, dest, source_allocator_v, dest_allocator_v );
     }
     static void copy( erasure_handle const & self_base, void * dest, void * dest_allocator_v ) {
         auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v );
         auto & self = static_cast< allocator_erasure const & >( self_base );
         // Structure the control flow differently to avoid instantiating the copy constructor.
-        alloc const & dest_allocator = dest_allocator_p?
-            static_cast< alloc const & >( * dest_allocator_p ) : self.get_allocator();
+        allocator const & dest_allocator = dest_allocator_p?
+            static_cast< allocator const & >( * dest_allocator_p ) : self.alloc();
         auto & e = * new (dest) allocator_erasure( std::allocator_arg, dest_allocator, self );
-        if ( dest_allocator_p ) * dest_allocator_p = static_cast< common_allocator const & >( e.get_allocator() ); // Likewise, update the wrapper alloc instance with the new copy.
+        if ( dest_allocator_p ) * dest_allocator_p = static_cast< common_allocator const & >( e.alloc() ); // Likewise, update the wrapper allocator instance with the new copy.
     }
     static void destroy( erasure_handle & self_base, void * allocator_v ) noexcept {
         auto & self = static_cast< allocator_erasure & >( self_base );
-        allocator_traits::destroy( self.get_allocator(), self.target_address() );
-        allocator_traits::deallocate( self.get_allocator(), self.target, 1 );
-        if ( allocator_v ) * static_cast< common_allocator * >( allocator_v ) = static_cast< common_allocator const & >( self.get_allocator() );
+        allocator_traits::destroy( self.alloc(), self.target_address() );
+        allocator_traits::deallocate( self.alloc(), self.target, 1 );
+        if ( allocator_v ) * static_cast< common_allocator * >( allocator_v ) = static_cast< common_allocator const & >( self.alloc() );
         self. ~ allocator_erasure();
     }
 };
 
-template< typename alloc, typename target_type, typename ... sig >
-struct is_allocator_erasure< allocator_erasure< alloc, target_type, sig ... > > : std::true_type {};
+template< typename allocator, typename target_type, typename ... sig >
+struct is_allocator_erasure< allocator_erasure< allocator, target_type, sig ... > > : std::true_type {};
 
-template< typename alloc, typename target_type, typename ... sig >
-struct erasure_trivially_movable< allocator_erasure< alloc, target_type, sig ... > > : std::integral_constant< bool,
-    std::is_trivially_constructible< allocator_erasure< alloc, target_type, sig ... >, allocator_erasure< alloc, target_type, sig ... > && >::value
-    && std::is_trivially_destructible< allocator_erasure< alloc, target_type, sig ... > >::value
-    && is_always_equal< alloc >::value > {};
+template< typename allocator, typename target_type, typename ... sig >
+struct erasure_trivially_movable< allocator_erasure< allocator, target_type, sig ... > > : std::integral_constant< bool,
+    std::is_trivially_constructible< allocator_erasure< allocator, target_type, sig ... >, allocator_erasure< allocator, target_type, sig ... > && >::value
+    && std::is_trivially_destructible< allocator_erasure< allocator, target_type, sig ... > >::value
+    && is_always_equal< allocator >::value > {};
 
-template< typename alloc, typename target_type, typename ... sig >
-struct erasure_nontrivially_copyable< allocator_erasure< alloc, target_type, sig ... > >
+template< typename allocator, typename target_type, typename ... sig >
+struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type, sig ... > >
     : std::is_copy_constructible< target_type > {};
 
-DISPATCH_TABLE( allocator_erasure, target_type, ( typename alloc, typename target_type, typename ... sig ), ( alloc, target_type, sig ... ),
+DISPATCH_TABLE( allocator_erasure, target_type, ( typename allocator, typename target_type, typename ... sig ), ( allocator, target_type, sig ... ),
     return std::forward< typename transfer_qualifiers< erasure_ref, target_type >::type >( * self.target )( std::forward< arg >( a ) ... );
 )
 
@@ -445,8 +449,11 @@ MSVC_FIX (
 template< typename t, typename sig >
 struct is_callable : is_callable_dispatch< t, sig > {};
 
-template< typename alloc, typename sig >
-struct is_callable< std::scoped_allocator_adaptor< alloc >, sig >
+template< typename allocator, typename sig >
+struct is_callable< std::scoped_allocator_adaptor< allocator >, sig >
+    : std::false_type {};
+template< typename t, typename sig >
+struct is_callable< in_place_t< t >, sig >
     : std::false_type {};
 )
 template< typename sig >
@@ -619,11 +626,10 @@ struct allocator_mismatch_error : std::exception // This should be implemented i
     { virtual char const * what() const noexcept override { return "An object could not be transferred into an incompatible memory allocation scheme."; } };
 
 // Mix-in a persistent allocator to produce a [unique_]function_container.
-template< typename alloc >
+template< typename allocator >
 class wrapper_allocator
-    : common_allocator_rebind< alloc > {
-    typedef std::allocator_traits< common_allocator_rebind< alloc > > allocator_traits;
-    static_assert ( std::is_same< alloc, typename allocator_traits::template rebind_alloc< typename alloc::value_type > >::value, "bad rebind" );
+    : common_allocator_rebind< allocator > {
+    typedef std::allocator_traits< common_allocator_rebind< allocator > > allocator_traits;
     
     void do_swap( std::true_type, wrapper_allocator & o ) noexcept
         { using std::swap; swap( actual_allocator(), o.actual_allocator() ); }
@@ -635,7 +641,7 @@ protected:
     /*  Do select_on_container_copy_construction here, although the "container" is really represented
         by the set of all equivalent allocators in various independent target objects. */
     wrapper_allocator( wrapper_allocator const & o )
-        : common_allocator_rebind< alloc >( allocator_traits::select_on_container_copy_construction( o ) )
+        : common_allocator_rebind< allocator >( allocator_traits::select_on_container_copy_construction( o ) )
         {}
     
     // Likewise the rationale for POCMA, POCCA, and POCS. They propagate freely between targets, not between containers.
@@ -650,34 +656,34 @@ protected:
     void swap( wrapper_allocator & o ) noexcept
         { do_swap( allocator_traits::propagate_on_container_swap(), o ); }
     static constexpr bool noexcept_move_assign = allocator_traits::propagate_on_container_move_assignment::value
-        || MSVC_FIX(impl::)is_always_equal< alloc >::value;
+        || MSVC_FIX(impl::)is_always_equal< allocator >::value;
     static constexpr bool noexcept_move_adopt = false; // Adoption may produce an allocator_mismatch_error.
     
     template< typename derived, typename t >
     derived reallocate( t && o )
         { return { std::allocator_arg, actual_allocator(), std::forward< t >( o ) }; }
     
-    common_allocator_rebind< alloc > & actual_allocator()
+    common_allocator_rebind< allocator > & actual_allocator()
         { return * this; }
     
-    // Determine whether to use the stored alloc for an initialization or assignment.
+    // Determine whether to use the stored allocator for an initialization or assignment.
     template< typename erasure_base > // Templating this is a bit bogus, since it only uses the "vtable header," but the type system doesn't know that.
-    common_allocator_rebind< alloc > * compatible_allocator( erasure_base const & e ) {
-        std::type_info const * type = std::get< + dispatch_slot::allocator_type >( e.table ); // Get dynamic type of the source alloc.
+    common_allocator_rebind< allocator > * compatible_allocator( erasure_base const & e ) {
+        std::type_info const * type = std::get< + dispatch_slot::allocator_type >( e.table ); // Get dynamic type of the source allocator.
         if ( type == nullptr ) return nullptr; // It's a local erasure. Allocators don't apply. Avoid the potentially expensive type_info::operator==.
         if ( * type != typeid (actual_allocator()) ) throw allocator_mismatch_error{}; // Oh no!
         return & actual_allocator();
     }
-    common_allocator_rebind< alloc > * any_allocator()
+    common_allocator_rebind< allocator > * any_allocator()
         { return & actual_allocator(); }
     
-    typedef alloc allocator_t;
+    typedef allocator allocator_t;
 public: // Include the container-like interface.
     wrapper_allocator() = default;
-    wrapper_allocator( std::allocator_arg_t, alloc const & in_alloc ) noexcept
-        : common_allocator_rebind< alloc >( in_alloc ) {}
+    wrapper_allocator( std::allocator_arg_t, allocator const & in_alloc ) noexcept
+        : common_allocator_rebind< allocator >( in_alloc ) {}
     
-    alloc get_allocator() const
+    allocator get_allocator() const
         { return * this; }
 };
 
@@ -697,7 +703,7 @@ protected:
     
     // This defines the default allocation of targets generated by non-container functions.
     typedef wrapper_no_allocator allocator_t;
-    std::allocator< char > actual_allocator() { return {}; }
+    MSVC_SKIP(std::allocator< char >) MSVC_FIX(stdallocchar) actual_allocator() { return {}; }
     
     template< typename erasure_base >
     static constexpr void * compatible_allocator( erasure_base const & )
@@ -1172,6 +1178,8 @@ constexpr auto && recover( erasure_ref && e ) {
 }
 #endif
 
+#undef allocator
+#undef alloc
 #undef MSVC_SKIP
 #undef MSVC_FIX
 
