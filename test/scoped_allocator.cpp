@@ -8,6 +8,12 @@
 
 std::map< int, std::size_t > pool;
 
+#ifdef _MSC_VER
+#   define MSVC_FIX(...) __VA_ARGS__
+#else
+#   define MSVC_FIX(...)
+#endif
+
 template< typename t >
 struct pool_alloc : std::allocator< t > {
     int id;
@@ -16,7 +22,7 @@ struct pool_alloc : std::allocator< t > {
     pool_alloc( pool_alloc< u > const & o )
         : id( o.id ) {}
 
-    pool_alloc( int in_id )
+    pool_alloc( int in_id MSVC_FIX( = -1 ) )
         : id( in_id ) {}
 
     t * allocate( std::size_t n ) {
@@ -67,7 +73,7 @@ struct listful_op {
         : state( o.state, a ) {}
 
     explicit listful_op( pool_string s, state_alloc a )
-        : state( { std::move( s ) }, a ) {}
+        : state( std::initializer_list< pool_string >{ std::move( s ) }, a ) {}
 
     void operator () () const
         { /* std::cout << "op says " << state << " from pool id " << state.get_allocator().id << '\n'; */ }
@@ -106,10 +112,13 @@ int main() {
         #if __clang__ || __GNUC__ >= 5
         m[ 42 ].assign( fv, m.get_allocator() );
         #else
-        m.insert( std::make_pair( 42, fv ) );
+        {
+            auto p = std::make_pair( 42, function< void() >( std::allocator_arg, fct::allocator_type{ 3 }, fv ) );
+            m.insert( p );
+        }
         #endif
         std::size_t pre = pool[ 3 ];
-        pool_string{ pool_alloc< char >{ 3 } }.swap( m[ 42 ].target< stateful_op >()->state );
+        pool_string{ pool_alloc< char >{ 3 } }.swap( m.at( 42 ).target< stateful_op >()->state );
         assert ( pre - pool[ 3 ] == op.state.capacity() + 1 );
     }
     fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );

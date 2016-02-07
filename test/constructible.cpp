@@ -43,6 +43,8 @@ static_assert ( std::is_assignable< ft, ft const && >::value, "" );
 static_assert ( ! std::is_constructible< function< int( int ) & >, std::allocator_arg_t, std::allocator< uft >, uft >::value, "" );
 static_assert ( ! std::is_constructible< function< int( int ) & >, std::allocator_arg_t, std::allocator< uft >, uft & >::value, "" );
 
-uft a, q( std::allocator_arg, std::allocator< uft >{}, a ); // Fails.
+static_assert ( ! std::is_constructible< function< int( int ) && >, f >::value, "" );
+
+//uft a, q( std::allocator_arg, std::allocator< uft >{}, a ); // Fails.
 
 int main () {}
