@@ -3,6 +3,8 @@
 
 A prototype for new `std::function` features, compatible with C++11.
 
+This branch includes MSVC support. It is also compatible with Clang and GCC, however it may not be updated as often.
+
 *by David Krauss (potatoswatter)*
 <!-- language: lang-cxx -->
 
@@ -232,6 +234,10 @@ Bugs
 ====
 
 Please report issues [on GitHub](https://github.com/potswa/cxx_function/issues). Here are some that are already known:
+
+- MSVC does not support SFINAE in `std::result_of`. In turn, passing an object not supporting the given call signatures to
+  a constructor in this library will produce a hard error. The standard requires `std::function` to ignore constructors
+  taking target objects that would be invalid, and Microsoft's library does provide this feature.
 
 - `function` and `unique_function` constructors taking an allocator but no target should be deprecated, and should accept
   any allocator type. Instead, they require a `std::allocator` specialization and give no warning.
