@@ -1079,11 +1079,11 @@ DEFINE_WRAPPER_OPS( unique_function_container )
 // See proposal, "std::recover: undoing type erasure"
 
 template< typename erasure >
-void const * recover_address( erasure & e, std::false_type )
+void const volatile * recover_address( erasure & e, std::false_type )
     { return e.complete_object_address(); }
 
 template< typename erasure >
-void const * recover_address( erasure & e, std::true_type )
+void const volatile * recover_address( erasure & e, std::true_type )
     { return e.referent_address(); }
 
 struct bad_type_recovery : std::exception
