@@ -686,6 +686,7 @@ class wrapper
     template< template< typename ... > class, typename, typename ... >
     friend class wrapper;
     
+    using wrapper::wrapper_base::erasure;
     using wrapper::wrapper_base::storage;
     using wrapper::wrapper_base::storage_address;
     using wrapper::wrapper_base::init;
@@ -699,12 +700,11 @@ class wrapper
             && std::is_nothrow_move_constructible< source >::value;
     };
     
-    template< typename, typename = void >
+    template< typename, typename = typename wrapper::wrapper_base >
     struct is_compatibly_wrapped : std::false_type
         { static const bool with_compatible_allocation = false; };
     template< typename source >
-    struct is_compatibly_wrapped< source, typename std::enable_if<
-            std::is_same< typename wrapper::wrapper_base, typename source::wrapper_base >::value >::type >
+    struct is_compatibly_wrapped< source, typename source::wrapper_base >
         : std::true_type {
         static const bool with_compatible_allocation = allocator_manager::noexcept_move_adopt
             || std::is_same< typename wrapper::allocator_t, typename source::wrapper::allocator_t >::value;
@@ -717,9 +717,9 @@ class wrapper
         typename source::wrapper & o = s;
         auto nontrivial = std::get< + dispatch_slot::move_constructor_destructor >( o.erasure().table );
         if ( ! nontrivial ) {
-            std::memcpy( storage_address(), & o.storage, sizeof (storage) );
+            std::memcpy( & erasure(), & o.erasure(), sizeof (storage) );
         } else {
-            nontrivial( std::move( o ).erasure(), storage_address(), o.any_allocator(), allocator_manager::compatible_allocator( o.erasure() ) );
+            nontrivial( std::move( o ).erasure(), & erasure(), o.any_allocator(), allocator_manager::compatible_allocator( o.erasure() ) );
         }
         o.init( in_place_t< std::nullptr_t >{}, nullptr );
     }
@@ -729,8 +729,8 @@ class wrapper
     init( in_place_t< source >, source const & s ) {
         typename wrapper::wrapper_base const & o = s;
         auto nontrivial = std::get< + dispatch_slot::copy_constructor >( o.erasure().table );
-        if ( ! nontrivial ) std::memcpy( storage_address(), & o.storage, sizeof (storage) );
-        else nontrivial( o.erasure(), storage_address(), allocator_manager::compatible_allocator( o.erasure() ) );
+        if ( ! nontrivial ) std::memcpy( & erasure(), & o.erasure(), sizeof (storage) );
+        else nontrivial( o.erasure(), & erasure(), allocator_manager::compatible_allocator( o.erasure() ) );
     }
     
     // In-place construction of a compatible source uses a temporary to check its constraints.
