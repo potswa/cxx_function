@@ -818,6 +818,7 @@ public:
             || is_compatibly_wrapped< source >::with_compatible_allocation )
         { init( in_place_t< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
 
+    #if ! __clang__ && __GNUC__ < 5
     // Prevent slicing fallback to copy/move constructor.
     template< typename source,
         typename std::enable_if<
@@ -825,6 +826,7 @@ public:
             || ! std::is_constructible< typename std::decay< source >::type, source >::value
         >::type * = nullptr >
     wrapper( source && s ) = delete;
+    #endif
     
     template< typename allocator, typename source,
         typename = typename std::enable_if<
