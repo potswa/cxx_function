@@ -226,7 +226,7 @@ struct null_erasure
 };
 
 DISPATCH_TABLE( null_erasure, void, ( typename ... sig ), ( sig ... ),
-    (void) self; (void) sizeof ... (a); throw std::bad_function_call{};
+    (void) (char &) self; int use[] = { 0, ((void) (char&) a, 0) ... }; (void) use; throw std::bad_function_call{};
 )
 
 // Implement erasures of objects which are small and have a well-defined call operator.
