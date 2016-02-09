@@ -28,6 +28,21 @@ constexpr in_place_t< t > in_place = {};
 
 namespace impl {
 
+#if ! __clang__ && __GNUC__ < 5
+#   define is_trivially_move_constructible has_trivial_copy_constructor
+#   define is_trivially_copy_constructible has_trivial_copy_constructor
+
+#   define deprecated(MSG) __attribute__((deprecated (MSG)))
+
+#   define OLD_GCC_FIX(...) __VA_ARGS__
+#   define OLD_GCC_SKIP(...)
+#else
+#   define deprecated(MSG) [[deprecated (MSG)]]
+
+#   define OLD_GCC_FIX(...)
+#   define OLD_GCC_SKIP(...) __VA_ARGS__
+#endif
+
 #define UNPACK(...) __VA_ARGS__
 #define IGNORE(...)
 
@@ -130,7 +145,7 @@ constexpr typename std::enable_if<
 
 template< typename erasure >
 struct erasure_trivially_movable : std::integral_constant< bool,
-    std::is_trivially_constructible< erasure, erasure && >::value
+    std::is_trivially_move_constructible< erasure >::value
     && std::is_trivially_destructible< erasure >::value > {};
 
 template< typename derived >
@@ -385,7 +400,7 @@ struct is_allocator_erasure< allocator_erasure< allocator, target_type, sig ... 
 
 template< typename allocator, typename target_type, typename ... sig >
 struct erasure_trivially_movable< allocator_erasure< allocator, target_type, sig ... > > : std::integral_constant< bool,
-    std::is_trivially_constructible< allocator_erasure< allocator, target_type, sig ... >, allocator_erasure< allocator, target_type, sig ... > && >::value
+    std::is_trivially_move_constructible< allocator_erasure< allocator, target_type, sig ... > >::value
     && std::is_trivially_destructible< allocator_erasure< allocator, target_type, sig ... > >::value
     && is_always_equal< allocator >::value > {};
 
@@ -491,7 +506,7 @@ template< typename derived, std::size_t n, typename ret, typename ... arg, typen
 struct wrapper_dispatch< derived, n, const_unsafe_case< ret( arg ... ) >, more ... >
     : wrapper_dispatch< derived, n, more ... > {
     using wrapper_dispatch< derived, n, more ... >::operator ();
-    [[deprecated( "It is unsafe to call a std::function of non-const signature through a const access path." )]]
+    deprecated( "It is unsafe to call a std::function of non-const signature through a const access path." )
     ret operator () ( arg ... a ) const {
         return const_cast< derived & >( static_cast< derived const & >( * this ) )
             ( std::forward< arg >( a ) ... );
@@ -827,16 +842,6 @@ public:
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value
             || is_compatibly_wrapped< source >::with_compatible_allocation )
         { init( in_place_t< typename std::decay< source >::type >{}, std::forward< source >( s ) ); }
-
-    #if ! __clang__ && __GNUC__ < 5
-    // Prevent slicing fallback to copy/move constructor.
-    template< typename source,
-        typename std::enable_if<
-            ! is_targetable< typename std::decay< source >::type >::value
-            || ! std::is_constructible< typename std::decay< source >::type, source >::value
-        >::type * = nullptr >
-    wrapper( source && s ) = delete;
-    #endif
     
     template< typename allocator, typename source,
         typename = typename std::enable_if<
@@ -955,7 +960,8 @@ public:
     function() noexcept = default; // Investigate why these are needed. Compiler bug?
     function( function && s ) noexcept = default;
     function( function const & ) = default;
-    function & operator = ( function && s ) noexcept = default;
+    function & operator = ( function && o ) noexcept OLD_GCC_SKIP( = default; )
+        OLD_GCC_FIX ( { function::wrapper::operator = ( static_cast< typename function::wrapper && >( o ) ); return * this; } )
     function & operator = ( function const & o ) = default;
     
     using function::wrapper::operator ();
@@ -984,7 +990,8 @@ public:
     unique_function() noexcept = default;
     unique_function( unique_function && s ) noexcept = default;
     unique_function( unique_function const & ) = delete;
-    unique_function & operator = ( unique_function && s ) noexcept = default;
+    unique_function & operator = ( unique_function && o ) noexcept OLD_GCC_SKIP( = default; )
+        OLD_GCC_FIX ( { unique_function::wrapper::operator = ( static_cast< typename unique_function::wrapper && >( o ) ); return * this; } )
     unique_function & operator = ( unique_function const & o ) = delete;
     
     using unique_function::wrapper::operator ();
@@ -1004,7 +1011,7 @@ public:
 
 template< typename allocator, typename ... sig >
 class function_container
-    : impl::wrapper< impl::is_copyable_all_callable< function< sig ... >, sig ... >, impl::wrapper_allocator< allocator >, sig ... > {
+    : impl::wrapper< impl::is_copyable_all_callable< function_container< allocator, sig ... >, sig ... >, impl::wrapper_allocator< allocator >, sig ... > {
     template< typename, typename, typename ... >
     friend class impl::wrapper;
 public:
@@ -1111,6 +1118,9 @@ constexpr auto && recover( erasure_ref && e ) {
 }
 #endif
 
+#undef is_trivially_move_constructible
+#undef is_trivially_copy_constructible
+#undef deprecated
 }
 
 #endif

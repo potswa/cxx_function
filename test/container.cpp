@@ -84,4 +84,8 @@ int main() {
     assert ( q.get_allocator().total() == 5 + sizeof (q) );
     
     q = f;
+    r = std::move( q );
+    cxx_function::unique_function_container< accountant<void>, accounting() > s = r;
+    s = std::move( r );
+    s = std::move( s );
 }
