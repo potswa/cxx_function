@@ -835,7 +835,7 @@ public:
     template< typename source,
         typename std::enable_if<
             is_targetable< typename std::decay< source >::type >::value
-            && std::is_constructible< typename std::decay< source >::type, source >::value
+            && std::is_constructible< typename std::decay< source >::type, source && >::value
             && ! std::is_base_of< wrapper, typename std::decay< source >::type >::value
         >::type * = nullptr >
     wrapper( source && s )
@@ -885,7 +885,7 @@ public:
     template< typename source,
         typename std::enable_if<
             is_compatibly_wrapped< typename std::decay< source >::type >::value
-            && std::is_constructible< typename std::decay< source >::type, source >::value
+            && std::is_constructible< typename std::decay< source >::type, source && >::value
             && ! std::is_base_of< wrapper, typename std::decay< source >::type >::value
         >::type * = nullptr >
     wrapper &
@@ -896,7 +896,7 @@ public:
     template< typename source,
         typename std::enable_if<
             is_targetable< typename std::decay< source >::type >::value
-            && std::is_constructible< typename std::decay< source >::type, source >::value
+            && std::is_constructible< typename std::decay< source >::type, source && >::value
             && ! is_compatibly_wrapped< typename std::decay< source >::type >::value
         >::type * = nullptr >
     wrapper &
