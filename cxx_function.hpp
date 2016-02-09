@@ -148,12 +148,11 @@ struct erasure_nontrivially_copyable : std::integral_constant< bool,
     && ! std::is_trivially_copy_constructible< erasure >::value > {};
 
 template< typename derived, typename enable >
-constexpr typename std::enable_if< enable::value && erasure_nontrivially_copyable< derived >::value >::type
-( * erasure_copy() ) ( erasure_handle const &, void *, void * )
+constexpr typename std::enable_if< std::enable_if< enable::value, erasure_nontrivially_copyable< derived > >::type::value >::type
+( * erasure_copy( enable * ) ) ( erasure_handle const &, void *, void * )
     { return & derived::copy; }
-template< typename derived, typename enable >
-constexpr typename std::enable_if< ! enable::value || ! erasure_nontrivially_copyable< derived >::value >::type
-( * erasure_copy() ) ( erasure_handle const &, void *, void * )
+template< typename derived >
+constexpr void ( * erasure_copy( ... ) ) ( erasure_handle const &, void *, void * )
     { return nullptr; }
 
 template< typename derived >
@@ -205,7 +204,7 @@ template< typename erasure, typename copyable, typename ... free >
 typename erasure::dispatch_table erasure_table< erasure, copyable, erasure_base< free ... > >::value {
     erasure_destroy< erasure >(),
     erasure_move< erasure >(),
-    erasure_copy< erasure, copyable >(),
+    erasure_copy< erasure >( static_cast< copyable * >( nullptr ) ),
     & erasure::target_access,
     typeid (typename erasure::target_type),
     erasure_allocator_type< erasure >(),
