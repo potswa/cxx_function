@@ -71,7 +71,7 @@ struct erasure_handle {}; // The member function should belong to a class derive
 #define TYPE_CONVERT_CASE( QUALS, UNSAFE ) \
 template< typename ret, typename ... arg > \
 struct implicit_object_to_parameter< ret( arg ... ) QUALS > \
-    { typedef ret type( add_reference< erasure_handle QUALS >::type, arg ... ); };
+    { typedef ret type( add_reference< erasure_handle QUALS >::type, arg && ... ); };
 DISPATCH_ALL( TYPE_CONVERT_CASE )
 #undef TYPE_CONVERT_CASE
 
