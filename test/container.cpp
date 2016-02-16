@@ -88,4 +88,5 @@ int main() {
     cxx_function::unique_function_container< accountant<void>, accounting() > s = r;
     s = std::move( r );
     s = std::move( s );
+    assert ( s != nullptr );
 }

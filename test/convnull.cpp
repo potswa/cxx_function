@@ -7,11 +7,17 @@ struct c {
     operator function< void() > () const { return {}; }
 };
 
+struct d : private function< void() > {
+    void operator() ( int ) {}
+};
+
 int main() {
     function< void( int ) > a;
     function< void( long ) > b = a;
     assert ( ! b );
     b = c{};
+    assert ( b );
+    b = d{};
     assert ( b );
 }
 
