@@ -603,6 +603,12 @@ public:
         { return ! verify_type< void >(); }
 };
 
+template< typename target, typename ... sig >
+typename std::enable_if< std::is_base_of< wrapper_base< sig ... >, target >::value,
+bool >::type is_empty_wrapper( in_place_t< target > *, wrapper_base< sig ... > const * arg )
+    { return ! * arg; }
+inline bool is_empty_wrapper( ... ) { return false; }
+
 struct allocator_mismatch_error : std::exception // This should be implemented in a .cpp file, but stay header-only for now.
     { virtual char const * what() const noexcept override { return "An object could not be transferred into an incompatible memory allocation scheme."; } };
 
@@ -786,7 +792,10 @@ class wrapper
     // Allocated erasures.
     template< typename in_allocator, typename source, typename ... arg >
     typename std::enable_if< ! is_compatibly_wrapped< source >::value && ! is_small< source >::value >::type
-    init( std::allocator_arg_t, in_allocator && alloc, in_place_t< source >, arg && ... a ) {
+    init( std::allocator_arg_t, in_allocator && alloc, in_place_t< source > t, arg && ... a ) {
+        if ( is_empty_wrapper( & t, & a ... ) ) {
+            return init( in_place_t< std::nullptr_t >{}, nullptr );
+        }
         typedef typename std::allocator_traits< typename std::decay< in_allocator >::type >::template rebind_alloc< source > allocator;
         typedef allocator_erasure< allocator, source, typename implicit_object_to_parameter< sig >::type ... > erasure;
         static_assert ( is_allocator_erasure< erasure >::value, "" );
