@@ -11,6 +11,10 @@ struct d : private function< void() > {
     void operator() ( int ) {}
 };
 
+struct d2 : public function< void() > {
+    void operator() ( int ) {}
+};
+
 int main() {
     function< void( int ) > a;
     function< void( long ) > b = a;
@@ -18,6 +22,8 @@ int main() {
     b = c{};
     assert ( b );
     b = d{};
+    assert ( b );
+    b = d2{};
     assert ( b );
 }
 
