@@ -620,7 +620,8 @@ struct allocator_mismatch_error : std::exception // This should be implemented i
 template< typename allocator >
 class wrapper_allocator
     : common_allocator_rebind< allocator > {
-    typedef std::allocator_traits< common_allocator_rebind< allocator > > allocator_traits;
+    typedef common_allocator_rebind< allocator > common_allocator;
+    typedef std::allocator_traits< common_allocator > allocator_traits;
     
     void do_swap( std::true_type, wrapper_allocator & o ) noexcept
         { using std::swap; swap( actual_allocator(), o.actual_allocator() ); }
@@ -632,7 +633,7 @@ protected:
     /*  Do select_on_container_copy_construction here, although the "container" is really represented
         by the set of all equivalent allocators in various independent target objects. */
     wrapper_allocator( wrapper_allocator const & o )
-        : common_allocator_rebind< allocator >( allocator_traits::select_on_container_copy_construction( o ) )
+        : common_allocator( allocator_traits::select_on_container_copy_construction( o ) )
         {}
     
     // Likewise the rationale for POCMA, POCCA, and POCS. They propagate freely between targets, not between containers.
@@ -653,25 +654,25 @@ protected:
     derived reallocate( t && o )
         { return { std::allocator_arg, actual_allocator(), std::forward< t >( o ) }; }
     
-    common_allocator_rebind< allocator > & actual_allocator()
+    common_allocator & actual_allocator()
         { return * this; }
     
     // Determine whether to use the stored allocator for an initialization or assignment.
     template< typename erasure_base > // Templating this is a bit bogus, since it only uses the "vtable header," but the type system doesn't know that.
-    common_allocator_rebind< allocator > * compatible_allocator( erasure_base const & e ) {
+    common_allocator * compatible_allocator( erasure_base const & e ) {
         std::type_info const * type = std::get< + dispatch_slot::allocator_type >( e.table ); // Get dynamic type of the source allocator.
         if ( type == nullptr ) return nullptr; // It's a local erasure. Allocators don't apply. Avoid the potentially expensive type_info::operator==.
-        if ( * type != typeid (actual_allocator()) ) throw allocator_mismatch_error{}; // Oh no!
+        if ( * type != typeid (common_allocator) ) throw allocator_mismatch_error{}; // Oh no!
         return & actual_allocator();
     }
-    common_allocator_rebind< allocator > * any_allocator()
+    common_allocator * any_allocator()
         { return & actual_allocator(); }
     
     typedef allocator allocator_t;
 public: // Include the container-like interface.
     wrapper_allocator() = default;
     wrapper_allocator( std::allocator_arg_t, allocator const & in_alloc ) noexcept
-        : common_allocator_rebind< allocator >( in_alloc ) {}
+        : common_allocator( in_alloc ) {}
     
     allocator get_allocator() const
         { return * this; }
