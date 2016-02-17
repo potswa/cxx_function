@@ -128,20 +128,16 @@ struct erasure_special {
 };
 
 // These accessors generate "vtable" entries, but avoid instantiating functions that do not exist or would be trivial.
-// Most are specialized for allocator_erasure.
-template< typename >
-struct is_allocator_erasure : std::false_type {};
-
 template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_destructible< derived >::value
-    || is_allocator_erasure< derived >::value >::type
+    || derived::common_allocator_type_info != nullptr >::type
 ( * erasure_destroy() ) ( erasure_handle &, void * )
     { return & derived::destroy; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_destructible< derived >::value
-    && ! is_allocator_erasure< derived >::value >::type
+    && derived::common_allocator_type_info == nullptr >::type
 ( * erasure_destroy() ) ( erasure_handle &, void * )
     { return nullptr; }
 
@@ -237,7 +233,7 @@ struct null_erasure
         { throw std::bad_function_call{}; }
 };
 
-// Implement erasures of objects which are small and have a well-defined call operator.
+// Implement erasures of function pointers and std::reference_wrapper, which avoid any allocation.
 template< typename in_target_type, typename ... sig >
 struct local_erasure
     : erasure_base< sig ... >
@@ -392,9 +388,6 @@ struct allocator_erasure
 };
 
 template< typename allocator, typename target_type, typename ... sig >
-struct is_allocator_erasure< allocator_erasure< allocator, target_type, sig ... > > : std::true_type {};
-
-template< typename allocator, typename target_type, typename ... sig >
 struct erasure_trivially_movable< allocator_erasure< allocator, target_type, sig ... > > : std::integral_constant< bool,
     std::is_trivially_move_constructible< allocator_erasure< allocator, target_type, sig ... > >::value
     && std::is_trivially_destructible< allocator_erasure< allocator, target_type, sig ... > >::value
@@ -403,7 +396,6 @@ struct erasure_trivially_movable< allocator_erasure< allocator, target_type, sig
 template< typename allocator, typename target_type, typename ... sig >
 struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type, sig ... > >
     : std::is_copy_constructible< target_type > {};
-
 
 // Metaprogramming for checking a potential target against a list of signatures.
 template< bool ... cond >
@@ -797,7 +789,6 @@ class wrapper
         }
         typedef typename std::allocator_traits< typename std::decay< in_allocator >::type >::template rebind_alloc< source > allocator;
         typedef allocator_erasure< allocator, source, typename implicit_object_to_parameter< sig >::type ... > erasure;
-        static_assert ( is_allocator_erasure< erasure >::value, "" );
         // TODO: Add a new erasure template to put the fancy pointer on the heap.
         static_assert ( sizeof (erasure) <= sizeof storage, "Stateful allocator or fancy pointer is too big for polymorphic function wrapper." );
         new (storage_address()) erasure( typename target_policy::copies{}, std::allocator_arg, alloc, std::forward< arg >( a ) ... );
