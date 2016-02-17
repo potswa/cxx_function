@@ -728,7 +728,7 @@ class wrapper
     template< typename source, typename allocator = typename allocator_manager::allocator_t >
     struct is_small {
         static const bool value = sizeof (local_erasure< source, typename implicit_object_to_parameter< sig >::type ... >) <= sizeof (storage)
-            && alignof (source) <= alignof (decltype (storage))
+            && alignof (decltype (storage)) % alignof (source) == 0
             && ! std::uses_allocator< source, allocator >::value
             && std::is_nothrow_move_constructible< source >::value;
     };
