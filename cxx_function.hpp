@@ -172,16 +172,6 @@ template< typename derived >
 constexpr void ( * erasure_copy( ... ) ) ( erasure_handle const &, void *, void * )
     { return nullptr; }
 
-template< typename derived >
-constexpr typename std::enable_if< is_allocator_erasure< derived >::value,
-std::type_info const * >::type erasure_allocator_type()
-    { return & typeid (typename derived::common_allocator); }
-
-template< typename derived >
-constexpr typename std::enable_if< ! is_allocator_erasure< derived >::value,
-std::type_info const * >::type erasure_allocator_type()
-    { return nullptr; }
-
 
 template< typename >
 struct const_unsafe_case; // internal tag for function signatures introduced for backward compatibility of const-qualified access
@@ -224,7 +214,7 @@ typename erasure::dispatch_table erasure_table< erasure, copyable, erasure_base<
     erasure_copy< erasure >( static_cast< copyable * >( nullptr ) ),
     & erasure::target_access,
     typeid (typename erasure::target_type),
-    erasure_allocator_type< erasure >(),
+    + erasure::common_allocator_type_info,
     static_cast< free * >( & erasure::template call< typename transfer_param_qualifiers< free, erasure >::type > ) ...
 };
 
@@ -234,6 +224,7 @@ struct null_erasure
     : erasure_base< sig ... > // "vtable" interface class
     , erasure_special< null_erasure< sig ... > > { // generic implementations of "virtual" functions
     typedef void target_type;
+    static constexpr std::type_info const * common_allocator_type_info = nullptr;
     
     // The const qualifier is bogus. Rather than type-erase an identical non-const version, let the wrapper do a const_cast.
     static void const * target_access( erasure_handle const & ) { return nullptr; } // target<void>() still returns nullptr.
@@ -253,6 +244,7 @@ struct local_erasure
     , erasure_special< local_erasure< in_target_type, sig ... > > {
     typedef in_target_type target_type;
     target_type target;
+    static constexpr std::type_info const * common_allocator_type_info = nullptr;
     
     static void const * target_access( erasure_handle const & self )
         { return & static_cast< local_erasure const & >( self ).target; }
@@ -275,6 +267,7 @@ struct ptm_erasure
     , erasure_special< ptm_erasure< in_target_type, sig ... > > {
     typedef in_target_type target_type;
     target_type target; // Do not use mem_fn here...
+    static constexpr std::type_info const * common_allocator_type_info = nullptr;
     
     static void const * target_access( erasure_handle const & self )
         { return & static_cast< ptm_erasure const & >( self ).target; } // ... because the user can get read/write access to the target object.
@@ -316,6 +309,7 @@ struct allocator_erasure
     , allocator { // empty base class optimization (EBCO)
     typedef std::allocator_traits< allocator > allocator_traits;
     typedef common_allocator_rebind< allocator > common_allocator;
+    static constexpr std::type_info const * common_allocator_type_info = & typeid (common_allocator);
     
     typedef in_target_type target_type;
     typename allocator_traits::pointer target;
