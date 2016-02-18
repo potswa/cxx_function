@@ -86,10 +86,10 @@ int main() {
     stateful_op op( { "hello from a very long string", pool_alloc< char >{ 0 } } );
     
     typedef function_container< std::scoped_allocator_adaptor< pool_alloc<char> >, void() > fct;
-    fct fc1( std::allocator_arg, pool_alloc< char >{ 1 } );
+    fct fc1( pool_alloc< char >{ 1 } );
     fc1 = op;
     function< void() > fv = fc1;
-    fct fc2( std::allocator_arg, pool_alloc< char >{ 2 } );
+    fct fc2( pool_alloc< char >{ 2 } );
     fc2 = fv;
     
     op();

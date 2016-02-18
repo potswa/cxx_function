@@ -21,6 +21,8 @@ static_assert ( std::is_nothrow_constructible< function< int( int ) >, function<
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, function< int( int ) & > >::value, "" );
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, function< int( int ) const & > >::value, "" );
 
+static_assert ( ! std::is_constructible< function< int( int ) >, function< int( int ) >, std::allocator<void> >::value, "" );
+
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
     in_place_t< std::nullptr_t >, std::nullptr_t >::value, "" );
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
