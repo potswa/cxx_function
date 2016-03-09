@@ -563,7 +563,7 @@ protected:
         if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
             || ! ( nontrivial = s.erasure().table.move_constructor_destructor ) ) {
             std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
-        } else nontrivial( std::move( s ).erasure(), & this->erasure(), dest_alloc );
+        } else nontrivial( std::move( s.erasure() ), & this->erasure(), dest_alloc );
         s.emplace_trivial( in_place_t< std::nullptr_t >{} );
     }
     
@@ -627,11 +627,10 @@ protected:
 public:
     typedef erasure_table< free ... > table_type;
     
-    #define ERASURE_ACCESS( QUALS, UNSAFE ) \
-        erasure_base QUALS erasure() QUALS \
-            { return reinterpret_cast< erasure_base QUALS >( storage ); }
-    DISPATCH_CVREFQ( ERASURE_ACCESS, )
-    #undef ERASURE_ACCESS
+    erasure_base & erasure()
+        { return reinterpret_cast< erasure_base & >( storage ); }
+    erasure_base const & erasure() const
+        { return reinterpret_cast< erasure_base const & >( storage ); }
     
     void operator = ( wrapper_base && s ) noexcept { // Only suitable for generating implicit members in derived classes: wrong return type.
         destroy();
