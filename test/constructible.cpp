@@ -18,8 +18,8 @@ static_assert ( ! std::is_convertible< f, function< int( int ) &, int( int ) && 
 
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) > >::value, "" );
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) > && >::value, "" );
-static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, function< int( int ) & > >::value, "" );
-static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, function< int( int ) const & > >::value, "" );
+static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) & > >::value, "" );
+static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) const & > >::value, "" );
 
 static_assert ( ! std::is_constructible< function< int( int ) >, function< int( int ) >, std::allocator<void> >::value, "" );
 
@@ -31,9 +31,9 @@ static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, std::al
 typedef unique_function< int( int ) & > uft;
 static_assert ( std::is_assignable< uft, uft >::value, "" );
 static_assert ( std::is_assignable< uft, uft && >::value, "" );
-static_assert ( ! std::is_assignable< uft, uft & >::value, "" );
+//static_assert ( ! std::is_assignable< uft, uft & >::value, "" ); -- Removed assignability SFINAE.
 static_assert ( ! std::is_assignable< uft, uft const & >::value, "" );
-static_assert ( ! std::is_assignable< uft, uft const && >::value, "" );
+//static_assert ( ! std::is_assignable< uft, uft const && >::value, "" );
 
 typedef function< int( int ) & > ft;
 static_assert ( std::is_assignable< ft, ft >::value, "" );

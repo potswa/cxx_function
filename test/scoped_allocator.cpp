@@ -112,6 +112,7 @@ int main() {
         pool_string{ pool_alloc< char >{ 3 } }.swap( m[ 42 ].target< stateful_op >()->state );
         assert ( pre - pool[ 3 ] == op.state.capacity() + 1 );
     }
+    assert ( fc2.target< stateful_op >() );
     fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
     fc1 = fc2;
     fv = nullptr;
