@@ -83,9 +83,9 @@ struct erasure_base {
     Call dispatch entry types are normalized to non-member, unqualified form.
 */
 struct erasure_utility {
-    void (* destructor)( erasure_base &, void * alloc );
-    void (* move_constructor_destructor)( erasure_base &&, void * dest, void * source_alloc, void * dest_alloc );
-    void (* copy_constructor)( erasure_base const &, void * dest, void * alloc );
+    void (* destructor)( erasure_base & );
+    void (* move_constructor_destructor)( erasure_base &&, void * dest, void const * source_alloc );
+    void (* copy_constructor)( erasure_base const &, void * dest, void const * alloc );
     
     void const * (*target_access)( erasure_base const & );
     std::type_info const & target_type;
@@ -144,13 +144,13 @@ DISPATCH_CV( TRANSFER_QUALS_CASE, , )
 // Default, generic "virtual" functions to manage the wrapper payload lifetime.
 template< typename derived >
 struct erasure_special {
-    static void destroy( erasure_base & self, void * ) noexcept
+    static void destroy( erasure_base & self ) noexcept
         { static_cast< derived & >( self ). ~ derived(); }
-    static void move( erasure_base && self, void * dest, void *, void * ) {
+    static void move( erasure_base && self, void * dest, void const * ) {
         new (dest) derived( std::move( static_cast< derived & >( self ) ) );
-        destroy( self, {} );
+        destroy( self );
     }
-    static void copy( erasure_base const & self, void * dest, void * )
+    static void copy( erasure_base const & self, void * dest, void const * )
         { new (dest) derived( static_cast< derived const & >( self ) ); }
 };
 
@@ -159,13 +159,13 @@ template< typename derived >
 constexpr typename std::enable_if<
     ! std::is_trivially_destructible< derived >::value
     || derived::common_allocator_type_info != nullptr >::type
-( * erasure_destroy() ) ( erasure_base &, void * )
+( * erasure_destroy() ) ( erasure_base & )
     { return & derived::destroy; }
 template< typename derived >
 constexpr typename std::enable_if<
     std::is_trivially_destructible< derived >::value
     && derived::common_allocator_type_info == nullptr >::type
-( * erasure_destroy() ) ( erasure_base &, void * )
+( * erasure_destroy() ) ( erasure_base & )
     { return nullptr; }
 
 template< typename erasure >
@@ -175,11 +175,11 @@ struct erasure_trivially_movable : std::integral_constant< bool,
 
 template< typename derived >
 constexpr typename std::enable_if< ! erasure_trivially_movable< derived >::value >::type
-( * erasure_move() ) ( erasure_base &&, void *, void *, void * )
+( * erasure_move() ) ( erasure_base &&, void *, void const * )
     { return & derived::move; }
 template< typename derived >
 constexpr typename std::enable_if< erasure_trivially_movable< derived >::value >::type
-( * erasure_move() ) ( erasure_base &&, void *, void *, void * )
+( * erasure_move() ) ( erasure_base &&, void *, void const * )
     { return nullptr; }
 
 template< typename erasure >
@@ -189,10 +189,10 @@ struct erasure_nontrivially_copyable : std::integral_constant< bool,
 
 template< typename derived, typename enable >
 constexpr typename std::enable_if< std::enable_if< enable::value, erasure_nontrivially_copyable< derived > >::type::value >::type
-( * erasure_copy( enable * ) ) ( erasure_base const &, void *, void * )
+( * erasure_copy( enable * ) ) ( erasure_base const &, void *, void const * )
     { return & derived::copy; }
 template< typename derived >
-constexpr void ( * erasure_copy( ... ) ) ( erasure_base const &, void *, void * )
+constexpr void ( * erasure_copy( ... ) ) ( erasure_base const &, void *, void const * )
     { return nullptr; }
 
 
@@ -355,41 +355,38 @@ private:
                                                                     target_type const &, target_type && >::type >( * o.target ) );
     }
 public:
-    void move( std::true_type, void * dest, void *, void * ) noexcept { // Call ordinary move constructor.
+    void move( std::true_type, void * dest, void const * ) noexcept { // Call ordinary move constructor.
         new (dest) allocator_erasure( std::move( * this ) ); // Move the pointer, not the object. Don't call the allocator at all.
         this-> ~ allocator_erasure();
     }
-    void move( std::false_type, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
-        auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v ); // The wrapper verified the safety of this using typeid.
+    void move( std::false_type, void * dest, void const * dest_allocator_v ) {
+        auto * dest_allocator_p = static_cast< common_allocator const * >( dest_allocator_v ); // The wrapper verified the safety of this using typeid.
         if ( ! dest_allocator_p || * dest_allocator_p == alloc() ) {
-            move( std::true_type{}, dest, source_allocator_v, dest_allocator_v ); // same pool
+            move( std::true_type{}, dest, dest_allocator_v ); // same pool
         } else { // different pool
-            auto & e = * new (dest) allocator_erasure( std::allocator_arg, static_cast< allocator >( * dest_allocator_p ), // Reallocate.
+            new (dest) allocator_erasure( std::allocator_arg, static_cast< allocator >( * dest_allocator_p ), // Reallocate.
                 std::move_if_noexcept( * this ) ); // Protect user against their own throwing move constructors.
-            * dest_allocator_p = e.alloc(); // Update the wrapper allocator instance with the new copy, potentially updated by the new allocation.
-            destroy( * this, source_allocator_v );
+            destroy( * this );
         }
     }
     // [*_]allocator_v points to the wrapper allocator instance, if any.
-    static void move( erasure_base && self_base, void * dest, void * source_allocator_v, void * dest_allocator_v ) {
+    static void move( erasure_base && self_base, void * dest, void const * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure & >( self_base );
         // is_always_equal is usually false here, because it correlates with triviality which short-circuits this function.
-        std::move( self ).move( is_always_equal< allocator >{}, dest, source_allocator_v, dest_allocator_v );
+        std::move( self ).move( is_always_equal< allocator >{}, dest, dest_allocator_v );
     }
-    static void copy( erasure_base const & self_base, void * dest, void * dest_allocator_v ) {
-        auto * dest_allocator_p = static_cast< common_allocator * >( dest_allocator_v );
+    static void copy( erasure_base const & self_base, void * dest, void const * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure const & >( self_base );
         // Structure the control flow differently to avoid instantiating the copy constructor.
-        allocator const & dest_allocator = dest_allocator_p?
-            static_cast< allocator const & >( * dest_allocator_p ) : self.alloc();
-        auto & e = * new (dest) allocator_erasure( std::allocator_arg, dest_allocator, self );
-        if ( dest_allocator_p ) * dest_allocator_p = static_cast< common_allocator const & >( e.alloc() ); // Likewise, update the wrapper allocator instance with the new copy.
+        allocator const & dest_allocator = dest_allocator_v?
+            static_cast< allocator const & >( * static_cast< common_allocator const * >( dest_allocator_v ) )
+            : self.alloc();
+        new (dest) allocator_erasure( std::allocator_arg, dest_allocator, self );
     }
-    static void destroy( erasure_base & self_base, void * allocator_v ) noexcept {
+    static void destroy( erasure_base & self_base ) noexcept {
         auto & self = static_cast< allocator_erasure & >( self_base );
         allocator_traits::destroy( self.alloc(), self.target_address() );
         allocator_traits::deallocate( self.alloc(), self.target, 1 );
-        if ( allocator_v ) * static_cast< common_allocator * >( allocator_v ) = static_cast< common_allocator const & >( self.alloc() );
         self. ~ allocator_erasure();
     }
     
@@ -561,18 +558,18 @@ protected:
     // Default, move, and copy construction.
     // Adopt by move.
     template< typename allocator = void > // Allocator is already rebound to <char>.
-    void init( wrapper_base && s, allocator * dest_alloc = nullptr, void * source_alloc = nullptr ) {
+    void init( wrapper_base && s, allocator const * dest_alloc = nullptr ) {
         decltype (erasure_utility::move_constructor_destructor) nontrivial;
         if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
             || ! ( nontrivial = s.erasure().table.move_constructor_destructor ) ) {
             std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
-        } else nontrivial( std::move( s ).erasure(), & this->erasure(), source_alloc, dest_alloc );
+        } else nontrivial( std::move( s ).erasure(), & this->erasure(), dest_alloc );
         s.emplace_trivial( in_place_t< std::nullptr_t >{} );
     }
     
     // Adopt by copy.
     template< typename allocator = void >
-    void init( wrapper_base const & s, allocator * dest_alloc = nullptr ) {
+    void init( wrapper_base const & s, allocator const * dest_alloc = nullptr ) {
         decltype (erasure_utility::copy_constructor) nontrivial;
         if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
             || ! ( nontrivial = s.erasure().table.copy_constructor ) ) {
@@ -600,9 +597,9 @@ protected:
         new (storage_address()) local_erasure< std::reference_wrapper< t > >( tag< std::false_type, free ... >{}, r );
     }
     
-    void destroy( void * alloc = nullptr ) noexcept {
+    void destroy() noexcept {
         auto nontrivial = erasure().table.destructor;
-        if ( nontrivial ) nontrivial( erasure(), alloc );
+        if ( nontrivial ) nontrivial( erasure() );
     }
     
     // Implement erasure type verification for always-local targets without touching RTTI.
@@ -749,11 +746,6 @@ private:
         static_assert ( sizeof (erasure) <= sizeof storage, "Stateful allocator or fancy pointer is too big for polymorphic function wrapper." );
         new (storage_address()) erasure( tag< typename target_policy::copies, sig ... >{}, std::allocator_arg, * alloc, std::forward< arg >( a ) ... );
     }
-    // Update the allocator in a moved-from container wrapper. Do this here to leverage friendship.
-    template< typename other_target_policy, typename user_allocator, typename ... other_sig, typename common_allocator = void >
-    auto init( container_wrapper< other_target_policy, user_allocator, other_sig ... > && s, common_allocator * dest_alloc = nullptr )
-        -> typename std::enable_if< is_compatibly_wrapped< typename std::remove_reference< decltype (s) >::type >::value >::type
-        { return init( static_cast< typename wrapper::wrapper_base && >( s ), dest_alloc, & s.saved_allocator() ); }
     
     // When value-wise initialization isn't adoption, delegate to in-place construction or allocation.
     template< typename source >
