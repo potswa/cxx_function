@@ -508,12 +508,8 @@ struct wrapper_dispatch< derived, table_index, ret( arg ... ) QUALS, sig ... > \
         UNSAFE (, const_unsafe_case< ret( arg ... ) >) > { \
     using wrapper_dispatch< derived, table_index+1, sig ... \
         UNSAFE (, const_unsafe_case< ret( arg ... ) >) >::operator (); \
-    ret operator () ( arg ... a ) QUALS { \
-        erasure_base const & e = ((derived const &) * this).erasure(); \
-        return get< table_index, ret( erasure_base const &, arg && ... ) > \
-            ( reinterpret_cast< typename derived::table_type const & >( e.table ).dispatch ) \
-            ( e, std::forward< arg >( a ) ... ); \
-    } \
+    ret operator () ( arg ... a ) QUALS \
+        { return ( (derived const &) * this ).template call< table_index, ret >( std::forward< arg >( a ) ... ); } \
 };
 DISPATCH_ALL( WRAPPER_CASE )
 #undef WRAPPER_CASE
@@ -524,10 +520,8 @@ struct wrapper_dispatch< derived, n, const_unsafe_case< ret( arg ... ) >, more .
     : wrapper_dispatch< derived, n, more ... > {
     using wrapper_dispatch< derived, n, more ... >::operator ();
     deprecated( "It is unsafe to call a std::function of non-const signature through a const access path." )
-    ret operator () ( arg ... a ) const {
-        return const_cast< derived & >( static_cast< derived const & >( * this ) )
-            ( std::forward< arg >( a ) ... );
-    }
+    ret operator () ( arg ... a ) const
+        { return ( (derived &) * this ) ( std::forward< arg >( a ) ... ); }
 };
 
 struct allocator_mismatch_error : std::exception // This should be implemented in a .cpp file, but stay header-only for now.
@@ -625,8 +619,6 @@ protected:
     bool verify_type_impl( want * ) const noexcept
         { return target_type() == typeid (want); }
 public:
-    typedef erasure_table< free ... > table_type;
-    
     erasure_base & erasure()
         { return reinterpret_cast< erasure_base & >( storage ); }
     erasure_base const & erasure() const
@@ -647,6 +639,13 @@ public:
     operator = ( source const & s ) noexcept {
         destroy();
         emplace_trivial( in_place_t< source >{}, s );
+    }
+    
+    template< std::size_t table_index, typename ret, typename ... arg >
+    ret call( arg && ... a ) const {
+        return get< table_index, ret( erasure_base const &, arg && ... ) >
+            ( reinterpret_cast< erasure_table< free ... > const & >( erasure().table ).dispatch )
+            ( erasure(), std::forward< arg >( a ) ... );
     }
     
     std::type_info const & target_type() const noexcept
