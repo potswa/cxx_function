@@ -653,8 +653,7 @@ public:
     
     template< typename want >
     bool verify_type() const noexcept {
-        static_assert ( ! std::is_reference< want >::value, "function does not support reference-type targets." );
-        static_assert ( ! std::is_const< want >::value && ! std::is_volatile< want >::value, "function does not support cv-qualified targets." );
+        static_assert ( std::is_same< want, typename std::decay< want >::type >::value, "function target can only be of cv-unqualified object type." );
         return verify_type_impl( (want *) nullptr );
     }
     template< typename want >
