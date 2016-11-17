@@ -430,13 +430,35 @@ struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type 
         { typedef std::integral_constant< bool, ! cond::value > type; };
 #endif
 
+// Forbid certain return value conversions that require temporaries.
+template< typename from, typename to > // Primary case: from is object type. A prvalue is returned. Only allow user-defined conversions.
+struct is_bad_return // Converting a prvalue to a reference binds a temporary unless the prvalue is a class and the reference is not a base.
+    : negation< conjunction< std::is_class< from >, negation< std::is_base_of< to, from > > > > {};
+
+template< typename from, typename to > // Treat xvalues like lvalues.
+struct is_bad_return< from &&, to > : is_bad_return< from &, to > {};
+
+template< typename from, typename to > // From is reference type. Allow user-defined and derived-to-base conversions.
+struct is_bad_return< from &, to > // Forbid converting an lvalue to a reference unless it's a class or the types match.
+    : conjunction< negation< std::is_same< typename std::remove_cv< from >::type, to > >, negation< std::is_class< from > > > {};
+
+template< typename from, typename to >
+struct is_safely_convertible
+    : conjunction<
+        negation< conjunction< // Prevent binding a return value to a temporary.
+            std::is_reference< to >,
+            is_bad_return< from, typename std::decay< to >::type >
+        > >,
+        std::is_convertible< from, to >
+    >::type {};
+
 template< typename t, typename sig, typename = void >
 struct is_callable : std::false_type {};
 
 #define IS_CALLABLE_CASE( QUALS, UNSAFE ) \
 template< typename t, typename ret, typename ... arg > \
 struct is_callable< t, ret( arg ... ) QUALS, \
-    typename std::enable_if< std::is_convertible< \
+    typename std::enable_if< is_safely_convertible< \
         typename std::result_of< t QUALS REF ( arg ... ) >::type \
     , ret >::value >::type > \
     : std::true_type {};

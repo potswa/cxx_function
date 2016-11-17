@@ -8,6 +8,10 @@ struct f {
     int operator () ( int ) & { return 0; }
 };
 
+struct d : f {
+    operator int & () const { static int q; return q; }
+};
+
 static_assert ( std::is_default_constructible< function< int( int ) > >::value, "" );
 static_assert ( std::is_default_constructible< unique_function< int( int ) > >::value, "" );
 
@@ -15,6 +19,17 @@ static_assert ( std::is_convertible< f, function< int( int ) > >::value, "" );
 static_assert ( std::is_convertible< f, function< int( std::integral_constant< long, 100 > ) > >::value, "" );
 static_assert ( ! std::is_convertible< f, function< int( int ) && > >::value, "" );
 static_assert ( ! std::is_convertible< f, function< int( int ) &, int( int ) && > >::value, "" );
+
+static_assert ( std::is_convertible< function< d() >, function< f() > >::value, "" );
+static_assert ( std::is_convertible< function< d &() >, function< f const &() > >::value, "" );
+static_assert ( ! std::is_convertible< function< d() >, function< f const &() > >::value, "" );
+static_assert ( std::is_convertible< function< d() >, function< int const &() > >::value, "" );
+
+static_assert ( std::is_convertible< function< int() >, function< long() > >::value, "" );
+static_assert ( std::is_convertible< function< int &() >, function< int const &() > >::value, "" );
+static_assert ( ! std::is_convertible< function< int &() >, function< long const &() > >::value, "" );
+static_assert ( std::is_convertible< function< int * const &() >, function< void *() > >::value, "" );
+static_assert ( ! std::is_convertible< function< int * const &() >, function< void * const &() > >::value, "" );
 
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) > >::value, "" );
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) > && >::value, "" );
