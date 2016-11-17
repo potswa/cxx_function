@@ -145,6 +145,18 @@ an allocator representing a different memory pool. (See below.) It's better to r
 when possible, as it automatically computes and sets `noexcept` for you.
 
 
+## Enhanced safety
+
+A function object returning `const &` or `&&` should avoid returning a reference to a temporary. This library forbids target
+objects whose return type would force `function` to return a dangling reference. The standard library currently allows them.
+
+    function< int const &() > fn = []{ return 5; }; // Binding 5 to int const& would produce a dangling return value.
+
+This protection is not perfect. It may be defeated by implicit conversion between class types. This slips through the cracks:
+
+    function< std::pair< long, long > const &() > fn = []{ return std::make_pair( 1, 2 ); };
+
+
 ## Allocators
 
 This library implements a new allocator model, conforming (almost, see "Bugs" below) to the C++11 specification. (How can it be both

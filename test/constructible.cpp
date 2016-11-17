@@ -24,6 +24,7 @@ static_assert ( std::is_convertible< function< d() >, function< f() > >::value, 
 static_assert ( std::is_convertible< function< d &() >, function< f const &() > >::value, "" );
 static_assert ( ! std::is_convertible< function< d() >, function< f const &() > >::value, "" );
 static_assert ( std::is_convertible< function< d() >, function< int const &() > >::value, "" );
+static_assert ( std::is_convertible< function< d &() >, function< int const &() > >::value, "" );
 
 static_assert ( std::is_convertible< function< int() >, function< long() > >::value, "" );
 static_assert ( std::is_convertible< function< int &() >, function< int const &() > >::value, "" );
