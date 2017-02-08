@@ -16,11 +16,6 @@
 
 namespace cxx_function {
 
-template< typename t >
-struct id_t_help { typedef t type; };
-template< typename t >
-using id_t = typename id_t_help< t >::type;
-
 // Dispatch tag for in-place construction, for when explicit template arguments are unavailable (e.g. constructor calls).
 template< typename >
 struct in_place_t {};
