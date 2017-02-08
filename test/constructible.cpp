@@ -12,6 +12,12 @@ struct d : f {
     operator int & () const { static int q; return q; }
 };
 
+#if __cpp_noexcept_function_type
+struct ne {
+    int operator () ( int ) noexcept { return 0; }
+};
+#endif
+
 static_assert ( std::is_default_constructible< function< int( int ) > >::value, "" );
 static_assert ( std::is_default_constructible< unique_function< int( int ) > >::value, "" );
 
@@ -19,6 +25,14 @@ static_assert ( std::is_convertible< f, function< int( int ) > >::value, "" );
 static_assert ( std::is_convertible< f, function< int( std::integral_constant< long, 100 > ) > >::value, "" );
 static_assert ( ! std::is_convertible< f, function< int( int ) && > >::value, "" );
 static_assert ( ! std::is_convertible< f, function< int( int ) &, int( int ) && > >::value, "" );
+
+#if __cpp_noexcept_function_type
+static_assert ( ! std::is_default_constructible< function< int( int ) noexcept > >::value, "" );
+static_assert ( ! std::is_default_constructible< unique_function< int( int ) noexcept > >::value, "" );
+
+static_assert ( ! std::is_convertible< f, function< int( int ) noexcept > >::value, "" );
+static_assert ( std::is_convertible< ne, function< int( int ) noexcept > >::value, "" );
+#endif
 
 static_assert ( std::is_convertible< function< d() >, function< f() > >::value, "" );
 static_assert ( std::is_convertible< function< d &() >, function< f const &() > >::value, "" );

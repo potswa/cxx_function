@@ -52,14 +52,24 @@ namespace impl {
 #define UNPACK(...) __VA_ARGS__
 #define IGNORE(...)
 
-#define DISPATCH_CQ( MACRO, UNSAFE, QUALS ) MACRO( QUALS, UNSAFE ) MACRO( const QUALS, IGNORE )
-#define DISPATCH_CV( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, UNSAFE, QUALS ) DISPATCH_CQ( MACRO, IGNORE, volatile QUALS )
+#define DISPATCH_CQ( MACRO, UNSAFE, TYPE_QUALS, FN_QUALS ) \
+    MACRO( TYPE_QUALS, FN_QUALS, UNSAFE ) MACRO( const TYPE_QUALS, const FN_QUALS, UNSAFE )
+#define DISPATCH_CV( MACRO, UNSAFE, TYPE_QUALS, FN_QUALS ) \
+    DISPATCH_CQ( MACRO, UNSAFE, TYPE_QUALS, FN_QUALS ) DISPATCH_CQ( MACRO, UNSAFE, volatile TYPE_QUALS, volatile FN_QUALS )
 
 // Apply a given macro over all reference qualifications.
-#define DISPATCH_CVREFQ( MACRO, QUALS ) DISPATCH_CV( MACRO, IGNORE, & QUALS ) DISPATCH_CV( MACRO, IGNORE, && QUALS )
+#define DISPATCH_CVREFQ( MACRO, TYPE_QUALS, FN_QUALS ) \
+    DISPATCH_CV( MACRO, IGNORE, & TYPE_QUALS, & FN_QUALS ) DISPATCH_CV( MACRO, IGNORE, && TYPE_QUALS, && FN_QUALS )
 
-// Apply a given macro over all type qualifications.
-#define DISPATCH_ALL( MACRO ) DISPATCH_CV( MACRO, UNPACK, ) DISPATCH_CVREFQ( MACRO, )
+#define DISPATCH_CVOBJQ( MACRO, UNSAFE, TYPE_QUALS, FN_QUALS ) \
+    DISPATCH_CV( MACRO, UNSAFE, & TYPE_QUALS, FN_QUALS ) DISPATCH_CVREFQ( MACRO, TYPE_QUALS, FN_QUALS )
+
+// Apply a given macro over all function qualifications.
+#if __cpp_noexcept_function_type
+#   define DISPATCH_ALL( MACRO ) DISPATCH_CVOBJQ( MACRO, UNPACK, , ) DISPATCH_CVOBJQ( MACRO, IGNORE, , noexcept )
+#else
+#   define DISPATCH_ALL( MACRO ) DISPATCH_CVOBJQ( MACRO, UNPACK, , )
+#endif
 
 // General-purpose dispatch tag.
 template< typename ... > struct tag {};
@@ -115,9 +125,9 @@ free * get( erasure_dispatch< list ... > const & v )
 template< typename sig >
 struct member_to_free;
 
-#define TYPE_CONVERT_CASE( QUALS, UNSAFE ) \
+#define TYPE_CONVERT_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
 template< typename ret, typename ... arg > \
-struct member_to_free< ret( arg ... ) QUALS > \
+struct member_to_free< ret( arg ... ) FN_QUALS > \
     { typedef ret type( erasure_base const &, arg && ... ); };
 DISPATCH_ALL( TYPE_CONVERT_CASE )
 #undef TYPE_CONVERT_CASE
@@ -129,16 +139,12 @@ struct member_to_free< ret( erasure_base const &, arg ... ) >
 // Apply given cv-qualifiers and reference category to a new type.
 template< typename source, typename target >
 struct transfer_sig_qualifiers;
-#define TRANSFER_QUALS_CASE( QUALS, UNSAFE ) \
+#define TRANSFER_QUALS_CASE( TYPE_QUALS, FN_QUALS, REFLESS ) \
 template< typename ret, typename ... arg, typename target > \
-struct transfer_sig_qualifiers< ret( arg ... ) QUALS, target > \
-    { typedef target QUALS REF type; };
-#define REF
-DISPATCH_CVREFQ( TRANSFER_QUALS_CASE, )
-#undef REF
-#define REF &
-DISPATCH_CV( TRANSFER_QUALS_CASE, , )
-#undef REF
+struct transfer_sig_qualifiers< ret( arg ... ) FN_QUALS, target > \
+    { typedef target TYPE_QUALS type; };
+#define NOEXCEPT
+DISPATCH_ALL( TRANSFER_QUALS_CASE )
 #undef TRANSFER_QUALS_CASE
 
 // Default, generic "virtual" functions to manage the wrapper payload lifetime.
@@ -455,25 +461,35 @@ struct is_safely_convertible
 template< typename t, typename sig, typename = void >
 struct is_callable : std::false_type {};
 
-#define IS_CALLABLE_CASE( QUALS, UNSAFE ) \
+#define IS_CALLABLE_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
 template< typename t, typename ret, typename ... arg > \
-struct is_callable< t, ret( arg ... ) QUALS, \
+struct is_callable< t, ret( arg ... ) FN_QUALS, \
     typename std::enable_if< is_safely_convertible< \
-        typename std::result_of< t QUALS REF ( arg ... ) >::type \
+        typename std::result_of< t TYPE_QUALS ( arg ... ) >::type \
     , ret >::value >::type > \
     : std::true_type {};
-
-#define REF
-DISPATCH_CVREFQ( IS_CALLABLE_CASE, )
-#undef REF
-#define REF &
-DISPATCH_CV( IS_CALLABLE_CASE, , )
-#undef REF
+DISPATCH_CVOBJQ( IS_CALLABLE_CASE, IGNORE, , )
 #undef IS_CALLABLE_CASE
 
 template< typename sig >
 struct is_callable< std::nullptr_t, sig >
     : std::true_type {};
+
+#if __cpp_noexcept_function_type
+#   define NOEXCEPT_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
+    template< typename t, typename ret, typename ... arg > \
+    struct is_callable< t, ret( arg ... ) FN_QUALS noexcept, \
+        typename std::enable_if< std::is_nothrow_callable< t TYPE_QUALS ( arg ... ), ret >::value >::type > \
+        : is_callable< t, ret( arg ... ) FN_QUALS > {};
+    DISPATCH_CVOBJQ( NOEXCEPT_CASE, IGNORE, , )
+#   undef NOEXCEPT_CASE
+
+#   define NOEXCEPT_NULLPTR_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
+    template< typename ret, typename ... arg > \
+    struct is_callable< std::nullptr_t, ret( arg ... ) FN_QUALS > : std::false_type {};
+    DISPATCH_CVOBJQ( NOEXCEPT_NULLPTR_CASE, IGNORE, , noexcept )
+#   undef NOEXCEPT_NULLPTR_CASE
+#endif
 
 template< typename ... sig >
 struct is_all_callable {
@@ -521,16 +537,16 @@ struct const_unsafe_case; // internal tag for function signatures introduced for
 // This macro generates a recursive template handling one type qualifier sequence, e.g. "volatile &" or "const."
 // The final product converts a sequence of qualified signatures into an overload set, potentially with special cases for signatures of no qualification.
 #define WRAPPER_CASE( \
-    QUALS, /* The type qualifiers for this case. */ \
+    TYPE_QUALS, FN_QUALS, /* The type qualifiers for this case. */ \
     UNSAFE /* UNPACK if there are no qualifiers, IGNORE otherwise. Supports deprecated const-qualified access. */ \
 ) \
 template< typename derived, std::size_t table_index, typename ret, typename ... arg, typename ... sig > \
-struct wrapper_dispatch< derived, table_index, ret( arg ... ) QUALS, sig ... > \
+struct wrapper_dispatch< derived, table_index, ret( arg ... ) FN_QUALS, sig ... > \
     : wrapper_dispatch< derived, table_index+1, sig ... \
         UNSAFE (, const_unsafe_case< ret( arg ... ) >) > { \
     using wrapper_dispatch< derived, table_index+1, sig ... \
         UNSAFE (, const_unsafe_case< ret( arg ... ) >) >::operator (); \
-    ret operator () ( arg ... a ) QUALS \
+    ret operator () ( arg ... a ) FN_QUALS \
         { return ( (derived const &) * this ).template call< table_index, ret >( std::forward< arg >( a ) ... ); } \
 };
 DISPATCH_ALL( WRAPPER_CASE )
@@ -722,12 +738,22 @@ template< typename target, typename allocator >
 struct rebind_allocator_for_source< true, target, allocator >
     { typedef common_allocator_rebind< allocator > type; };
 
-template< typename target_policy, typename allocator, typename ... sig >
-class container_wrapper;
+template< typename derived, bool >
+struct nullptr_construction {
+    nullptr_construction() noexcept
+        { static_cast< derived * >( this )->emplace_trivial( in_place_t< std::nullptr_t >{} ); }
+    nullptr_construction( tag< struct trivialize > ) {}
+};
+template< typename derived >
+struct nullptr_construction< derived, false > {
+    nullptr_construction() noexcept = delete;
+    nullptr_construction( tag< struct trivialize > ) {}
+};
 
 template< typename target_policy, typename ... sig >
 class wrapper
     : public wrapper_base< typename member_to_free< sig >::type ... >
+    , private nullptr_construction< wrapper< target_policy, sig ... >, target_policy::template temp< std::nullptr_t >::value >
     , public wrapper_dispatch< wrapper< target_policy, sig ... >, 0, sig ... > {
     using wrapper::wrapper_base::storage;
     using wrapper::wrapper_base::storage_address;
@@ -795,16 +821,19 @@ private:
 public:
     typedef wrapper UGLY(wrapper_type);
     
-    wrapper() noexcept
-        { emplace_trivial( in_place_t< std::nullptr_t >{} ); }
-    wrapper( wrapper && s ) noexcept
+    wrapper() noexcept = default;
+    
+    friend typename wrapper::nullptr_construction;
+    #define NON_NULLPTR_CONSTRUCT : wrapper::nullptr_construction( tag< trivialize >{} )
+    
+    wrapper( wrapper && s ) noexcept NON_NULLPTR_CONSTRUCT
         { init( std::move( s ) ); }
-    wrapper( wrapper const & s )
+    wrapper( wrapper const & s ) NON_NULLPTR_CONSTRUCT
         { init( s ); }
     
     template< typename allocator >
     deprecated( "This constructor ignores its allocator argument. Specify allocation per-target or use function_container instead." )
-    wrapper( std::allocator_arg_t, allocator const & )
+    wrapper( std::allocator_arg_t, allocator const & ) NON_NULLPTR_CONSTRUCT
         { init( in_place_t< std::nullptr_t >{}, nullptr ); }
     
     template< typename source,
@@ -814,7 +843,7 @@ public:
         >::value >::type * = nullptr >
     wrapper( source && s )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value
-            || is_compatibly_wrapped< source >::value )
+            || is_compatibly_wrapped< source >::value ) NON_NULLPTR_CONSTRUCT
         { init( std::forward< source >( s ) ); }
     
     template< typename allocator, typename source,
@@ -822,7 +851,7 @@ public:
             is_targetable< typename std::decay< source >::type >::value
         >::type >
     wrapper( std::allocator_arg_t, allocator && alloc, source && s )
-    noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value ) {
+    noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value ) NON_NULLPTR_CONSTRUCT {
         // Adapt the allocator to the source. If it's already an rvalue of the right type, use it in-place.
         // It might make more sense to use modifiable lvalues in-place, but this is closer to the standard.
         typename rebind_allocator_for_source< is_compatibly_wrapped< typename std::decay< source >::type >::value,
@@ -847,6 +876,7 @@ public:
             && target_alloc = value( std::forward< allocator >( alloc ) );
         allocate< target >( & target_alloc, std::forward< arg >( a ) ... );
     }
+    #undef NON_NULLPTR_CONSTRUCT
     
     wrapper & operator = ( wrapper && ) = default;
     wrapper & operator = ( wrapper const & ) = default;
