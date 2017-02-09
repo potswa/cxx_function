@@ -1093,6 +1093,7 @@ public:
 #undef DISPATCH_CQ
 #undef DISPATCH_CV
 #undef DISPATCH_CVREFQ
+#undef DISPATCH_CVOBJQ
 #undef DISPATCH_ALL
 #undef DISPATCH_TABLE
 }
