@@ -770,7 +770,7 @@ protected: // Queries on potential targets. Shared with container_wrapper.
     struct is_compatibly_wrapped : std::false_type {};
     template< typename source >
     struct is_compatibly_wrapped< source, typename source::UGLY(wrapper_type), typename source::wrapper_base >
-        : conjunction< typename target_policy::copies, std::is_copy_constructible< source > >::type {};
+        : std::true_type {};
     
     template< typename source, typename allocator >
     bool nontrivial_target( source const & s, allocator const * alloc )
@@ -1026,7 +1026,7 @@ public:
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value )
         : container_wrapper( std::allocator_arg, {}, t, std::forward< arg >( a ) ... ) {}
     
-    container_wrapper & operator = ( container_wrapper && s ) = delete; // Always assign [unique_]function_container instead.
+    container_wrapper & operator = ( container_wrapper && s ) = delete; // Always assign [unique_]function_container instead, for conversion to unique.
     container_wrapper & operator = ( container_wrapper const & s ) = delete;
     
     template< typename source >
@@ -1113,14 +1113,21 @@ public:
     function( function && s ) noexcept = default;
     function( function const & ) = default;
     
-    function & operator = ( function && o ) noexcept OLD_GCC_SKIP( = default; )
-        OLD_GCC_FIX ( { wrapper::operator = ( static_cast< wrapper && >( o ) ); return * this; } )
-    function & operator = ( function const & o ) = default;
+    function & operator = ( function && o ) noexcept {
+        if ( & o != this ) wrapper::operator = ( static_cast< wrapper && >( o ) );
+        return * this;
+    }
+    function & operator = ( function const & o ) {
+        if ( & o != this ) wrapper::operator = ( static_cast< wrapper const & >( o ) );
+        return * this;
+    }
+    function & operator = ( function & s )
+        { return * this = static_cast< function const & >( s ); }
     
     template< typename source >
-    typename std::enable_if< std::is_assignable< function &, source && >::value,
+    typename std::enable_if< std::is_constructible< wrapper, source >::value,
     function & >::type operator = ( source && s )
-    noexcept( std::is_nothrow_assignable< wrapper &, source && >::value )
+    noexcept(noexcept( std::declval< wrapper & >() = std::declval< source >() ))
         { wrapper::operator = ( std::forward< source >( s ) ); return * this; }
     
     using wrapper::operator ();
@@ -1142,29 +1149,38 @@ class unique_function
     : impl::wrapper< impl::is_all_callable< sig ... >, sig ... > {
     template< typename, typename ... >
     friend class impl::wrapper;
+    typedef typename unique_function::wrapper wrapper;
 public:
     typedef unique_function UGLY(wrapper_type);
-    using unique_function::wrapper::wrapper;
+    using wrapper::wrapper;
     
     unique_function() noexcept = default;
     unique_function( unique_function && s ) noexcept = default;
     unique_function( unique_function const & ) = delete;
-    unique_function & operator = ( unique_function && o ) noexcept OLD_GCC_SKIP( = default; )
-        OLD_GCC_FIX ( { unique_function::wrapper::operator = ( static_cast< typename unique_function::wrapper && >( o ) ); return * this; } )
+    
+    unique_function & operator = ( unique_function && o ) noexcept {
+        if ( & o != this ) wrapper::operator = ( static_cast< wrapper && >( o ) );
+        return * this;
+    }
     unique_function & operator = ( unique_function const & o ) = delete;
     
-    using unique_function::wrapper::operator ();
-    using unique_function::wrapper::operator =;
-    using unique_function::wrapper::swap;
-    using unique_function::wrapper::target;
-    using unique_function::wrapper::target_type;
-    using unique_function::wrapper::verify_type;
-    using unique_function::wrapper::operator bool;
-    using unique_function::wrapper::complete_object_address;
+    template< typename source >
+    typename std::enable_if< std::is_constructible< wrapper, source >::value,
+    unique_function & >::type operator = ( source && s )
+    noexcept(noexcept( std::declval< wrapper & >() = std::declval< source >() ))
+        { wrapper::operator = ( std::forward< source >( s ) ); return * this; }
     
-    using unique_function::wrapper::assign;
-    using unique_function::wrapper::emplace_assign;
-    using unique_function::wrapper::allocate_assign;
+    using wrapper::operator ();
+    using wrapper::swap;
+    using wrapper::target;
+    using wrapper::target_type;
+    using wrapper::verify_type;
+    using wrapper::operator bool;
+    using wrapper::complete_object_address;
+    
+    using wrapper::assign;
+    using wrapper::emplace_assign;
+    using wrapper::allocate_assign;
     // No allocator_type or get_allocator.
 };
 
@@ -1216,9 +1232,9 @@ public:
         { return * this = static_cast< function_container const & >( s ); }
     
     template< typename source >
-    typename std::enable_if< std::is_assignable< wrapper &, source && >::value,
+    typename std::enable_if< wrapper::template is_targetable< typename std::decay< source >::type >::value,
     function_container & >::type operator = ( source && s )
-    noexcept( std::is_nothrow_assignable< wrapper &, source && >::value )
+    noexcept(noexcept( std::declval< wrapper & >() = std::declval< source >() ))
         { wrapper::operator = ( std::forward< source >( s ) ); return * this; }
     
     using wrapper::emplace_assign;
@@ -1274,9 +1290,9 @@ public:
     unique_function_container & operator = ( unique_function_container const & s ) = delete;
     
     template< typename source >
-    typename std::enable_if< std::is_assignable< wrapper &, source && >::value,
+    typename std::enable_if< wrapper::template is_targetable< typename std::decay< source >::type >::value,
     unique_function_container & >::type operator = ( source && s )
-    noexcept( std::is_nothrow_assignable< wrapper &, source && >::value )
+    noexcept(noexcept( std::declval< wrapper & >() = std::declval< source >() ))
         { wrapper::operator = ( std::forward< source >( s ) ); return * this; }
     
     using wrapper::operator ();

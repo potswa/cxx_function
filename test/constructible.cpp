@@ -51,6 +51,25 @@ static_assert ( std::is_nothrow_constructible< function< int( int ) >, function<
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) & > >::value, "" );
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, function< int( int ) const & > >::value, "" );
 
+static_assert ( std::is_nothrow_constructible< unique_function< int( int ) >, unique_function< int( int ) > >::value, "" );
+static_assert ( std::is_nothrow_constructible< unique_function< int( int ) >, unique_function< int( int ) > && >::value, "" );
+static_assert ( std::is_nothrow_constructible< unique_function< int( int ) >, unique_function< int( int ) & > >::value, "" );
+static_assert ( std::is_nothrow_constructible< unique_function< int( int ) >, unique_function< int( int ) const & > >::value, "" );
+
+static_assert ( std::is_nothrow_constructible< unique_function< int( int ) >, function< int( int ) const & > >::value, "" );
+static_assert ( ! std::is_constructible< function< int( int ) >, unique_function< int( int ) > >::value, "" );
+
+static_assert ( std::is_nothrow_assignable< unique_function< int( int ) >, function< int( int ) > >::value, "" );
+static_assert ( std::is_nothrow_assignable< unique_function< int( int ) >, function< int( int ) const & > >::value, "" );
+static_assert ( std::is_nothrow_assignable< unique_function< int( int ) >, unique_function< int( int ) const & > >::value, "" );
+static_assert ( ! std::is_assignable< function< int( int ) >, unique_function< int( int ) > >::value, "" );
+static_assert ( ! std::is_assignable< function< int( int ) >, unique_function< int( int ) const & > >::value, "" );
+
+static_assert ( std::is_nothrow_assignable< function< int( int ) >, function_container< std::allocator< char >, int( int ) > >::value, "" );
+static_assert ( std::is_nothrow_assignable< function< int( int ) >, function_container< std::allocator< char >, int( int ) const & > >::value, "" );
+static_assert ( ! std::is_assignable< function< int( int ) >, unique_function_container< std::allocator< char >, int( int ) > >::value, "" );
+static_assert ( ! std::is_assignable< function< int( int ) >, unique_function_container< std::allocator< char >, int( int ) const & > >::value, "" );
+
 static_assert ( ! std::is_constructible< function< int( int ) >, function< int( int ) >, std::allocator<void> >::value, "" );
 
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
@@ -79,4 +98,18 @@ static_assert ( ! std::is_constructible< function< int( int ) && >, f >::value, 
 
 uft a, q( std::allocator_arg, std::allocator< uft >{}, std::move( a ) );
 
-int main () {}
+int main () {
+    struct s {
+        volatile int i;
+        ~ s() { i = 42; }
+        int operator () ( int v ) {
+            int ret = i;
+            i = v;
+            return ret;
+        }
+    };
+    
+    function< int( int ) > x = s{ 3 };
+    x = std::move( x );
+    assert ( x( 5 ) == 3 );
+}
