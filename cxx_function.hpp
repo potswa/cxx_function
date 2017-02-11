@@ -16,13 +16,20 @@
 
 namespace cxx_function {
 
-// Dispatch tag for in-place construction, for when explicit template arguments are unavailable (e.g. constructor calls).
-template< typename >
-struct in_place_t {};
+#if __cplusplus > 201610
+    template< typename t >
+    using in_place_t = std::in_place_type_t;
 
-#if __cplusplus >= 201402
-template< typename t >
-constexpr in_place_t< t > in_place = {};
+    template< typename t >
+    constexpr in_place_t & in_place = std::in_place_type< t >;
+#else
+    template< typename >
+    struct in_place_t {};
+
+#   if __cplusplus >= 201402
+    template< typename t >
+    constexpr in_place_t< t > in_place = {};
+#   endif
 #endif
 
 namespace impl {
