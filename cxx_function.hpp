@@ -546,8 +546,13 @@ template< typename derived, std::size_t table_index, typename ret, typename ... 
 struct wrapper_dispatch< derived, table_index, ret( arg ... ) FN_QUALS, sig ... > \
     : wrapper_dispatch< derived, table_index+1, sig ... \
         UNSAFE (, const_unsafe_case< ret( arg ... ) >) > { \
-    using wrapper_dispatch< derived, table_index+1, sig ... \
-        UNSAFE (, const_unsafe_case< ret( arg ... ) >) >::operator (); \
+    typedef wrapper_dispatch< derived, table_index+1, sig ... \
+        UNSAFE (, const_unsafe_case< ret( arg ... ) >) > base; \
+    using base::operator (); \
+    using base::base; \
+    wrapper_dispatch() = default; \
+    wrapper_dispatch( ret (* p )( arg ... ) ) /* drops noexcept */ \
+        { static_cast< derived & >( * this ).emplace_trivial( in_place_t< ret (*)( arg ... ) >{}, p ); } \
     ret operator () ( arg ... a ) FN_QUALS \
         { return ( (derived const &) * this ).template call< table_index, ret >( std::forward< arg >( a ) ... ); } \
 };
@@ -827,6 +832,10 @@ public:
     
     friend typename wrapper::nullptr_construction;
     #define NON_NULLPTR_CONSTRUCT : wrapper::nullptr_construction( tag< trivialize >{} )
+    
+    template< typename, std::size_t, typename ... >
+    friend struct wrapper_dispatch;
+    using wrapper::wrapper_dispatch::wrapper_dispatch;
     
     wrapper( wrapper && s ) noexcept NON_NULLPTR_CONSTRUCT
         { init( std::move( s ) ); }
