@@ -1019,7 +1019,7 @@ protected:
     struct has_compatible_allocator< source, typename source::UGLY(common_allocator) > : std::true_type {};
     
     typedef std::integral_constant< bool,
-        allocator_traits::propagate_on_container_move_assignment::value || is_always_equal< allocator >::value > noexcept_move_assign;
+        allocator_traits::propagate_on_container_move_assignment::value || MSVC_FIX (impl::) is_always_equal< allocator >::value > noexcept_move_assign;
 public:
     allocator & saved_allocator() { return * this; } // Pseudo private, not const, and return type is not allocator_type.
     allocator const & saved_allocator() const { return * this; }
@@ -1042,7 +1042,7 @@ public:
         typename std::enable_if< is_targetable< typename std::decay< source >::type >::value >::type * = nullptr >
     container_wrapper( source && s, typename rebind_allocator_for_source< source >::type alloc = {} )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value
-            || ( is_compatibly_wrapped< source >::value && is_always_equal< allocator >::value ) )
+            || ( is_compatibly_wrapped< source >::value && MSVC_FIX (impl::) is_always_equal< allocator >::value ) )
         : wrapper( std::allocator_arg, /* not invalidating */ std::move( alloc ), std::forward< source >( s ) )
         , allocator{ std::move( alloc ) } {}
     
@@ -1089,8 +1089,8 @@ public:
     >::value >::type
     operator = ( source && s ) { // Throws allocator_mismatch_error.
         return this->nontrivial_target( s, & saved_allocator() ) // Verify dynamic allocator compatibility even if is_always_equal.
-            && ! is_always_equal< allocator >::value // POCMA doesn't apply here.
-            ? assign( typename is_always_equal< allocator >::type{}, std::move( s ) ) // If is_always_equal, this is a dead branch and a non-instantiation.
+            && ! MSVC_FIX (impl::) is_always_equal< allocator >::value // POCMA doesn't apply here.
+            ? assign( typename MSVC_FIX (impl::) is_always_equal< allocator >::type{}, std::move( s ) ) // If is_always_equal, this is a dead branch and a non-instantiation.
             : assign( std::true_type{}, std::move( s ) );
     }
     template< typename source >
@@ -1229,7 +1229,7 @@ class function_container
     typedef typename function_container::container_wrapper wrapper;
 public:
     typedef function_container UGLY(wrapper_type);
-    using typename wrapper::UGLY(common_allocator);
+    using MSVC_FIX (UGLY(common_allocator) =) typename function_container::wrapper::UGLY(common_allocator);
     
     function_container() = default; // Investigate why these are needed. Compiler bug?
     function_container( function_container && s ) noexcept = default;
@@ -1295,7 +1295,7 @@ class unique_function_container
     typedef typename unique_function_container::container_wrapper wrapper;
 public:
     typedef unique_function_container UGLY(wrapper_type);
-    using typename wrapper::UGLY(common_allocator);
+    using MSVC_FIX (UGLY(common_allocator) =) typename unique_function_container::wrapper::UGLY(common_allocator);
     
     unique_function_container() = default;
     unique_function_container( unique_function_container && s ) noexcept = default;
@@ -1398,6 +1398,8 @@ constexpr auto && recover( erasure_ref && e ) {
 #undef deprecated
 #undef OLD_GCC_FIX
 #undef OLD_GCC_SKIP
+#undef MSVC_FIX
+#undef MSVC_SKIP
 #undef UNPACK
 #undef IGNORE
 }

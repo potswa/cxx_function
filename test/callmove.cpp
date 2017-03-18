@@ -21,5 +21,11 @@ int main() {
     assert ( c[0] == 1 );
     q = m; // Copy-and-swap adds an unnecessary move.
     assert ( c[0] == 2 );
-    assert ( c[1] == 0 ); // Copy elision of return prvalues.
+    int reliable_copy_elision =
+#ifdef _MSC_VER
+        0;
+#else
+        1;
+#endif
+    assert ( c[1] == 1 - reliable_copy_elision ); // Copy elision of return prvalues.
 }
