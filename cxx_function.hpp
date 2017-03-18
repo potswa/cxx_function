@@ -36,7 +36,7 @@ namespace impl {
 
 #define UGLY( NAME ) CXX_FUNCTION_ ## NAME
 
-#if ! __clang__ && __GNUC__ < 5
+#if __GNUC__ && ! __clang__ && __GNUC__ < 5
 #   define is_trivially_move_constructible has_trivial_copy_constructor
 #   define is_trivially_copy_constructible has_trivial_copy_constructor
 
@@ -49,6 +49,14 @@ namespace impl {
 
 #   define OLD_GCC_FIX(...)
 #   define OLD_GCC_SKIP(...) __VA_ARGS__
+#endif
+
+#if _MSC_VER
+#   define MSVC_FIX(...) __VA_ARGS__
+#   define MSVC_SKIP(...)
+#else
+#   define MSVC_FIX(...)
+#   define MSVC_SKIP(...) __VA_ARGS__
 #endif
 
 #define UNPACK(...) __VA_ARGS__
@@ -163,16 +171,16 @@ struct erasure_special {
 };
 
 // These accessors generate "vtable" entries, but avoid instantiating functions that do not exist or would be trivial.
+template< typename erasure >
+struct erasure_trivially_destructible
+    : std::is_trivially_destructible< erasure > {};
+
 template< typename derived >
-constexpr typename std::enable_if<
-    ! std::is_trivially_destructible< derived >::value
-    || derived::common_allocator_type_info != nullptr >::type
+constexpr typename std::enable_if< ! erasure_trivially_destructible< derived >::value >::type
 ( * erasure_destroy() ) ( erasure_base & )
     { return & derived::destroy; }
 template< typename derived >
-constexpr typename std::enable_if<
-    std::is_trivially_destructible< derived >::value
-    && derived::common_allocator_type_info == nullptr >::type
+constexpr typename std::enable_if< erasure_trivially_destructible< derived >::value >::type
 ( * erasure_destroy() ) ( erasure_base & )
     { return nullptr; }
 
@@ -207,24 +215,30 @@ constexpr void ( * erasure_copy( ... ) ) ( erasure_base const &, void *, void co
 // Collect the above into global tables.
 // typename copyable enables non-trivial copyability. Trivially copyable and noncopyable tables both set it to false.
 // For trivial, pointer-like target types, sig is actually the sequence of free function types.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmissing-braces" // Need brace elision here.
+#define VTABLE_INITIALIZER = { \
+    erasure_destroy< erasure >(), \
+    erasure_move< erasure >(), \
+    erasure_copy< erasure >( static_cast< copyable * >( nullptr ) ), \
+    & erasure::target_access, \
+    typeid (typename erasure::target_type), \
+    erasure::common_allocator_type_info, \
+    & erasure::template call< sig > ..., \
+    erasure_dispatch<>{} \
+}
+#ifdef __GNUC__
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wmissing-braces" // Need brace elision here.
+#endif
 template< typename erasure, typename copyable, typename ... sig >
 struct make_erasure_table {
-    static constexpr erasure_table< typename member_to_free< sig >::type ... > value = {
-        erasure_destroy< erasure >(),
-        erasure_move< erasure >(),
-        erasure_copy< erasure >( static_cast< copyable * >( nullptr ) ),
-        & erasure::target_access,
-        typeid (typename erasure::target_type),
-        erasure::common_allocator_type_info,
-        & erasure::template call< sig > ...,
-        erasure_dispatch<>{}
-    };
+    static MSVC_SKIP (constexpr) erasure_table< typename member_to_free< sig >::type ... > const value MSVC_SKIP( VTABLE_INITIALIZER );
 };
-#pragma GCC diagnostic pop
+#ifdef __GNUC__
+#   pragma GCC diagnostic pop
+#endif
 template< typename erasure, typename copyable, typename ... sig >
-constexpr erasure_table< typename member_to_free< sig >::type ... > make_erasure_table< erasure, copyable, sig ... >::value;
+MSVC_SKIP (constexpr) erasure_table< typename member_to_free< sig >::type ... > const
+make_erasure_table< erasure, copyable, sig ... >::value MSVC_FIX( VTABLE_INITIALIZER );
 
 template< typename derived, typename copyable, typename ... sig >
 erasure_base::erasure_base( tag< derived, copyable, sig ... > )
@@ -311,12 +325,14 @@ struct is_always_equal : std::false_type {};
 template< typename t >
 struct is_always_equal< t, void, typename std::enable_if< std::allocator_traits< t >::is_always_equal::value >::type >
     : std::true_type {};
-template< typename t, typename v >
+MSVC_SKIP (
+template< typename t, typename v > // MSVC can't parse or SFINAE on the nested-name-specifier with decltype. Don't bother with this feature.
 struct is_always_equal< t, v, typename std::enable_if< decltype (std::declval< t >() == std::declval< t >())::value >::type >
     : std::true_type {};
-template< typename t >
+template< typename t > // MSVC doesn't find this to be more specialized than the first specialization, and it's unnecessary.
 struct is_always_equal< std::allocator< t > >
     : std::true_type {};
+)
 
 template< typename allocator, typename in_target_type >
 struct allocator_erasure
@@ -324,7 +340,8 @@ struct allocator_erasure
     , allocator { // empty base class optimization (EBCO)
     typedef std::allocator_traits< allocator > allocator_traits;
     typedef common_allocator_rebind< allocator > common_allocator;
-    static constexpr std::type_info const * common_allocator_type_info = & typeid (common_allocator);
+    static MSVC_SKIP (constexpr) std::type_info const * const common_allocator_type_info
+        MSVC_SKIP ( = & typeid (allocator_erasure::common_allocator) );
     
     typedef in_target_type target_type;
     typename allocator_traits::pointer target;
@@ -381,7 +398,7 @@ public:
     static void move( erasure_base && self_base, void * dest, void const * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure & >( self_base );
         // is_always_equal is usually false here, because it correlates with triviality which short-circuits this function.
-        std::move( self ).move( is_always_equal< allocator >{}, dest, dest_allocator_v );
+        std::move( self ).move( MSVC_FIX (impl::) is_always_equal< allocator >{}, dest, dest_allocator_v );
     }
     static void copy( erasure_base const & self_base, void * dest, void const * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure const & >( self_base );
@@ -404,6 +421,13 @@ public:
             ( * static_cast< allocator_erasure const & >( self ).target )( std::forward< arg >( a ) ... );
     }
 };
+template< typename allocator, typename in_target_type >
+MSVC_SKIP (constexpr) std::type_info const * const allocator_erasure< allocator, in_target_type >::common_allocator_type_info
+    MSVC_FIX ( = & typeid (allocator_erasure::common_allocator) );
+
+template< typename allocator, typename target_type >
+struct erasure_trivially_destructible< allocator_erasure< allocator, target_type > >
+    : std::false_type {};
 
 template< typename allocator, typename target_type >
 struct erasure_trivially_movable< allocator_erasure< allocator, target_type > > : std::integral_constant< bool,
@@ -414,6 +438,7 @@ struct erasure_trivially_movable< allocator_erasure< allocator, target_type > > 
 template< typename allocator, typename target_type >
 struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type > >
     : std::is_copy_constructible< target_type > {};
+
 
 // Metaprogramming for checking a potential target against a list of signatures.
 #if __cpp_lib_experimental_logical_traits
@@ -833,11 +858,12 @@ public:
     wrapper( wrapper const & s ) NON_NULLPTR_CONSTRUCT
         { init( s ); }
     
+MSVC_SKIP ( // MSVC cannot parse deprecated constructor templates, so remove this entirely.
     template< typename allocator >
     deprecated( "This constructor ignores its allocator argument. Specify allocation per-target or use function_container instead." )
     wrapper( std::allocator_arg_t, allocator const & ) NON_NULLPTR_CONSTRUCT
         { init( in_place_t< std::nullptr_t >{}, nullptr ); }
-    
+)
     template< typename source,
         typename std::enable_if< conjunction<
             negation< std::is_base_of< wrapper, typename std::decay< source >::type > >
