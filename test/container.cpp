@@ -87,6 +87,6 @@ int main() {
     r = std::move( q );
     cxx_function::unique_function_container< accountant<void>, accounting() > s = r;
     s = std::move( r );
-    s = std::move( s );
+    // s = std::move( s ); move assign from self triggers a clang-warning
     assert ( s != nullptr );
 }
