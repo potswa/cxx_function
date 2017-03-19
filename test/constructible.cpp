@@ -110,6 +110,6 @@ int main () {
     };
     
     function< int( int ) > x = s{ 3 };
-    x = std::move( x );
+    //x = std::move( x ); move assign from self triggers a clang warning.
     assert ( x( 5 ) == 3 );
 }
