@@ -101,7 +101,8 @@ int main() {
     assert ( pool[ 1 ] == op.state.capacity() * 2 + 2 + sizeof (stateful_op) * 2 );
     assert ( pool[ 2 ] == op.state.capacity() + 1 + sizeof (stateful_op) );
     {
-        std::map< int, function< void() >, std::less< int >, fct::allocator_type > m( pool_alloc< char >{ 3 } );
+        std::map< int, function< void() >, std::less< int >,
+            typename fct::allocator_type::template rebind< std::pair< int const, function< void() > > >::other > m( pool_alloc< char >{ 3 } );
         
         #if __clang__ || __GNUC__ >= 5
         m[ 42 ].assign( fv, m.get_allocator() );

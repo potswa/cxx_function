@@ -21,7 +21,7 @@ namespace cxx_function {
     using in_place_t = std::in_place_type_t< t >;
 
     template< typename t >
-    constexpr in_place_t & in_place = std::in_place_type< t >;
+    constexpr in_place_t< t > & in_place = std::in_place_type< t >;
 #else
     template< typename >
     struct in_place_t {};
@@ -79,6 +79,28 @@ namespace impl {
 #   define DISPATCH_ALL( MACRO ) DISPATCH_CVOBJQ( MACRO, UNPACK, , ) DISPATCH_CVOBJQ( MACRO, IGNORE, , noexcept )
 #else
 #   define DISPATCH_ALL( MACRO ) DISPATCH_CVOBJQ( MACRO, UNPACK, , )
+#endif
+
+#if __cpp_lib_experimental_logical_traits
+    using std::experimental::conjunction;
+    using std::experimental::negation;
+#else
+    template< typename ... cond >
+    struct conjunction
+        : std::true_type {};
+    template< typename next, typename ... cond >
+    struct conjunction< next, cond ... >
+        : conjunction< typename next::type, cond ... >::type {}; // Not conforming: does not propagate critical type-value.
+    template< typename ... cond >
+    struct conjunction< std::true_type, cond ... >
+        : conjunction< cond ... >::type {};
+    template< typename ... cond >
+    struct conjunction< std::false_type, cond ... >
+        : std::false_type {};
+    
+    template< typename cond >
+    struct negation
+        : std::integral_constant< bool, ! cond::value > {};
 #endif
 
 // General-purpose dispatch tag.
@@ -320,19 +342,22 @@ struct ptm_erasure
 template< typename allocator >
 using common_allocator_rebind = typename std::allocator_traits< allocator >::template rebind_alloc< char >;
 
-template< typename t, typename = void, typename = void >
-struct is_always_equal : std::false_type {};
+template< typename t, typename = void >
+struct not_always_equal_by_expression : std::true_type {};
 template< typename t >
-struct is_always_equal< t, void, typename std::enable_if< std::allocator_traits< t >::is_always_equal::value >::type >
-    : std::true_type {};
-MSVC_SKIP (
-template< typename t, typename v > // MSVC can't parse or SFINAE on the nested-name-specifier with decltype. Don't bother with this feature.
-struct is_always_equal< t, v, typename std::enable_if< decltype (std::declval< t >() == std::declval< t >())::value >::type >
-    : std::true_type {};
-template< typename t > // MSVC doesn't find this to be more specialized than the first specialization, and it's unnecessary.
-struct is_always_equal< std::allocator< t > >
-    : std::true_type {};
-)
+using id_t = t; // MSVC can't parse or SFINAE on a nested-name-specifier with decltype.
+template< typename t >
+struct not_always_equal_by_expression< t, typename std::enable_if< id_t< decltype (std::declval< t >() == std::declval< t >()) >::value >::type >
+    : std::false_type {};
+template< typename t, typename = void >
+struct not_always_equal_by_trait : std::true_type {};
+template< typename t >
+struct not_always_equal_by_trait< t, typename std::enable_if< std::allocator_traits< t >::is_always_equal::value >::type >
+    : std::false_type {};
+template< typename t >
+struct is_always_equal : negation< conjunction< not_always_equal_by_trait< t >, not_always_equal_by_expression< t > > > {};
+template< typename t >
+struct is_always_equal< std::allocator< t > > : std::true_type {};
 
 template< typename allocator, typename in_target_type >
 struct allocator_erasure
@@ -439,29 +464,6 @@ template< typename allocator, typename target_type >
 struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type > >
     : std::is_copy_constructible< target_type > {};
 
-
-// Metaprogramming for checking a potential target against a list of signatures.
-#if __cpp_lib_experimental_logical_traits
-    using std::experimental::conjunction;
-    using std::experimental::negation;
-#else
-    template< typename ... cond >
-    struct conjunction
-        : std::true_type {};
-    template< typename next, typename ... cond >
-    struct conjunction< next, cond ... >
-        : conjunction< typename next::type, cond ... >::type {}; // Not conforming: does not propagate critical type-value.
-    template< typename ... cond >
-    struct conjunction< std::true_type, cond ... >
-        : conjunction< cond ... >::type {};
-    template< typename ... cond >
-    struct conjunction< std::false_type, cond ... >
-        : std::false_type {};
-    
-    template< typename cond >
-    struct negation
-        { typedef std::integral_constant< bool, ! cond::value > type; };
-#endif
 
 // Forbid certain return value conversions that require temporaries.
 template< typename from, typename to > // Primary case: from is object type. A prvalue is returned. Only allow user-defined conversions.
