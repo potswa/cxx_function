@@ -145,6 +145,18 @@ an allocator representing a different memory pool. (See below.) It's better to r
 when possible, as it automatically computes and sets `noexcept` for you.
 
 
+## Enhanced safety
+
+A function object returning `const &` or `&&` should avoid returning a reference to a temporary. This library forbids target
+objects whose return type would force `function` to return a dangling reference. The standard library currently allows them.
+
+    function< int const &() > fn = []{ return 5; }; // Binding 5 to int const& would produce a dangling return value.
+
+This protection is not perfect. It may be defeated by implicit conversion between class types. This slips through the cracks:
+
+    function< std::pair< long, long > const &() > fn = []{ return std::make_pair( 1, 2 ); };
+
+
 ## Allocators
 
 This library implements a new allocator model, conforming (almost, see "Bugs" below) to the C++11 specification. (How can it be both
@@ -234,10 +246,6 @@ Bugs
 ====
 
 Please report issues [on GitHub](https://github.com/potswa/cxx_function/issues). Here are some that are already known:
-
-- MSVC does not support SFINAE in `std::result_of`. In turn, passing an object not supporting the given call signatures to
-  a constructor in this library will produce a hard error. The standard requires `std::function` to ignore constructors
-  taking target objects that would be invalid, and Microsoft's library does provide this feature.
 
 - `function` and `unique_function` constructors taking an allocator but no target should be deprecated, and should accept
   any allocator type. Instead, they require a `std::allocator` specialization and give no warning.

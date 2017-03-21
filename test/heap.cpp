@@ -1,14 +1,13 @@
 #include "cxx_function.hpp"
 #include <cassert>
-#include <array>
 
 using namespace cxx_function;
 
 
 int main() {
-    std::array< int, 100 > d = { 1, 2, 3 };
-    function< int *( int ) > f = [d] ( int i ) mutable { return d.data() + i; };
-    assert ( f( 0 ) != d.data() );
+    int d[ 100 ] = { 1, 2, 3 };
+    function< int *( int ) > f = [d] ( int i ) mutable { return d + i; };
+    assert ( f( 0 ) != d );
 
     assert ( * f( 2 ) == 3 );
     auto g = f;

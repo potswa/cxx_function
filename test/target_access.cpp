@@ -6,7 +6,7 @@ using namespace cxx_function;
 int * alias;
 
 struct vf {
-    virtual void operator() ( int i ) {}
+    virtual void operator() ( int ) {}
     int m = 5;
 
     vf() = default;

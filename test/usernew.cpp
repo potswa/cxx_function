@@ -1,6 +1,5 @@
 #include "cxx_function.hpp"
 #include <cassert>
-#include <array>
 
 bool intercepted = false;
 
@@ -11,7 +10,7 @@ void * operator new( std::size_t n, t * p ) {
 }
 
 int main() {
-    std::array< int, 100 > arr;
+    int arr[ 100 ];
 
     cxx_function::function< void() > q = [arr] () mutable { ++ arr[ 0 ]; };
     assert ( ! intercepted );

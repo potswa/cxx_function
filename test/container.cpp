@@ -72,16 +72,21 @@ int main() {
     auto r = q;
     assert ( q.get_allocator().total() == 5 );
     assert ( global_total == 10 );
-    q = [q] { return q.get_allocator(); };
+    q = [q] { return q.get_allocator(); }; // Copy, then overwrite q.
     assert ( q.get_allocator().total() == sizeof (q) );
     assert ( global_total == 10 + sizeof (q) );
     cxx_function::function< accounting() > f;
-    f = q;
-    assert ( q.get_allocator().total() == sizeof (q) );
+    f = q; // Use q's allocator for a new wrapper targeting a container with a five.
+    assert ( q.get_allocator().total() == 2 * sizeof (q) );
     assert ( global_total == 15 + 2 * sizeof (q) );
     
     f.assign( five, q.get_allocator() );
     assert ( q.get_allocator().total() == 5 + sizeof (q) );
     
     q = f;
+    r = std::move( q );
+    cxx_function::unique_function_container< accountant<void>, accounting() > s = r;
+    s = std::move( r );
+    s = std::move( s );
+    assert ( s != nullptr );
 }
