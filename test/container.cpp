@@ -65,7 +65,7 @@ struct immovable {
 int main() {
     cxx_function::function_container< accountant<void>, accounting() > q;
     immovable< 5 > c5;
-    auto five = [c5] { return accounting{}; };
+    auto five = [c5] { (void) c5; return accounting{}; };
     static_assert ( sizeof five == 5, "" );
     q = five;
     assert ( q.get_allocator().total() == 5 );
@@ -87,6 +87,11 @@ int main() {
     r = std::move( q );
     cxx_function::unique_function_container< accountant<void>, accounting() > s = r;
     s = std::move( r );
+    #if __GNUC__ && defined(__has_warning)
+    #   if __has_warning("-Wself-move")
+    #       pragma GCC diagnostic ignored "-Wself-move"
+    #   endif
+    #endif
     s = std::move( s );
     assert ( s != nullptr );
 }
