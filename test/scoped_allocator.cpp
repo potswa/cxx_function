@@ -16,7 +16,11 @@ struct pool_alloc : std::allocator< t > {
     pool_alloc( pool_alloc< u > const & o )
         : id( o.id ) {}
 
-    pool_alloc( int in_id )
+    pool_alloc( int in_id
+#if _MSC_VER && _MSC_VER < 1910
+                            = 0
+#endif
+                                )
         : id( in_id ) {}
 
     t * allocate( std::size_t n ) {
@@ -116,7 +120,11 @@ int main() {
     assert ( fc2.target< stateful_op >() );
     fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
     fc1 = fc2;
+#if ! _MSC_VER || _MSC_VER >= 1910
     fv = nullptr;
+#else
+    fv.operator = < std::nullptr_t >( nullptr );
+#endif
     
     assert ( pool[ 1 ] == pool[ 2 ] );
 }

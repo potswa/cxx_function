@@ -3,8 +3,8 @@
 
 using namespace cxx_function;
 
-
 int main() {
+#if ! _MSC_VER || _MSC_VER >= 1910
     int d[ 100 ] = { 1, 2, 3 };
     function< int *( int ) > f = [d] ( int i ) mutable { return d + i; };
     assert ( f( 0 ) != d );
@@ -21,5 +21,5 @@ int main() {
         f( 0 );
         abort();
     } catch ( std::bad_function_call & ) {}
+#endif
 }
-
