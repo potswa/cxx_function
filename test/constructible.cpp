@@ -72,10 +72,12 @@ static_assert ( ! std::is_assignable< function< int( int ) >, unique_function_co
 
 static_assert ( ! std::is_constructible< function< int( int ) >, function< int( int ) >, std::allocator<void> >::value, "" );
 
+#if ! _MSC_VER || _MSC_VER >= 1910
 static_assert ( std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
     in_place_t< std::nullptr_t >, std::nullptr_t >::value, "" );
 static_assert ( ! std::is_nothrow_constructible< function< int( int ) >, std::allocator_arg_t, std::allocator<void>,
     in_place_t< function< int( int ) > >, f >::value, "" );
+#endif
 
 typedef unique_function< int( int ) & > uft;
 static_assert ( std::is_assignable< uft, uft >::value, "" );
