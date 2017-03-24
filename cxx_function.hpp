@@ -339,8 +339,8 @@ struct ptm_erasure
     Fancy pointers exceeding the wrapper storage, with varying underlying referent storage, are another conundrum. */
 // Use Allocator<char> as a common reference point, for the typeid operator and the instance in function_container.
 // (The instance in the erasure object is always a bona fide Allocator<T>, though.)
-template< typename allocator_in >
-using common_allocator_rebind = typename std::allocator_traits< allocator_in >::template rebind_alloc< char >;
+template< typename allocator >
+using common_allocator_rebind = typename std::allocator_traits< allocator >::template rebind_alloc< char >;
 
 template< typename t, typename = void >
 struct not_always_equal_by_expression : std::true_type {};
@@ -450,18 +450,18 @@ template< typename allocator_in, typename in_target_type >
 MSVC_SKIP (constexpr) std::type_info const * const allocator_erasure< allocator_in, in_target_type >::common_allocator_type_info
     MSVC_FIX ( = & typeid (allocator_erasure::common_allocator) );
 
-template< typename allocator_in, typename target_type >
-struct erasure_trivially_destructible< allocator_erasure< allocator_in, target_type > >
+template< typename allocator, typename target_type >
+struct erasure_trivially_destructible< allocator_erasure< allocator, target_type > >
     : std::false_type {};
 
-template< typename allocator_in, typename target_type >
-struct erasure_trivially_movable< allocator_erasure< allocator_in, target_type > > : std::integral_constant< bool,
-    std::is_trivially_move_constructible< allocator_erasure< allocator_in, target_type > >::value
-    && std::is_trivially_destructible< allocator_erasure< allocator_in, target_type > >::value
-    && is_always_equal< allocator_in >::value > {};
+template< typename allocator, typename target_type >
+struct erasure_trivially_movable< allocator_erasure< allocator, target_type > > : std::integral_constant< bool,
+    std::is_trivially_move_constructible< allocator_erasure< allocator, target_type > >::value
+    && std::is_trivially_destructible< allocator_erasure< allocator, target_type > >::value
+    && is_always_equal< allocator >::value > {};
 
-template< typename allocator_in, typename target_type >
-struct erasure_nontrivially_copyable< allocator_erasure< allocator_in, target_type > >
+template< typename allocator, typename target_type >
+struct erasure_nontrivially_copyable< allocator_erasure< allocator, target_type > >
     : std::is_copy_constructible< target_type > {};
 
 
@@ -594,15 +594,15 @@ struct wrapper_dispatch< derived, n, const_unsafe_case< ret( arg ... ) >, more .
 struct allocator_mismatch_error : std::exception // This should be implemented in a .cpp file, but stay header-only for now.
     { virtual char const * what() const noexcept override { return "An object could not be transferred into an incompatible memory allocation scheme."; } };
 
-template< typename erasure_base, typename allocator_in >
-typename std::enable_if< ! std::is_void< allocator_in >::value,
-bool >::type nontrivial_target( erasure_base const * e, allocator_in const * ) {
+template< typename erasure_base, typename allocator >
+typename std::enable_if< ! std::is_void< allocator >::value,
+bool >::type nontrivial_target( erasure_base const * e, allocator const * ) {
     std::type_info const * type = e->table.allocator_type;
     if ( type == nullptr ) return false; // It's a raw pointer, PTMF, reference_wrapper, or nullptr.
-    if ( * type != typeid (allocator_in) ) throw allocator_mismatch_error{}; // Target belongs to a different allocation scheme.
+    if ( * type != typeid (allocator) ) throw allocator_mismatch_error{}; // Target belongs to a different allocation scheme.
     return true;
 }
-inline bool nontrivial_target( void const *, void const * ) { return true; } // Give false positives when not checking the allocator_in.
+inline bool nontrivial_target( void const *, void const * ) { return true; } // Give false positives when not checking the allocator.
 
 template< typename ... free >
 class wrapper_base {
@@ -618,10 +618,10 @@ protected:
     
     // Default, move, and copy construction.
     // Adopt by move.
-    template< typename allocator_in = void > // Allocator is already rebound to <char>.
-    void init( wrapper_base && s, allocator_in const * dest_alloc = nullptr ) {
+    template< typename allocator = void > // Allocator is already rebound to <char>.
+    void init( wrapper_base && s, allocator const * dest_alloc = nullptr ) {
         decltype (erasure_utility::move_constructor_destructor) nontrivial;
-        if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator_in. Save an access in pointer-like target case otherwise.
+        if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
             || ! ( nontrivial = s.erasure().table.move_constructor_destructor ) ) {
             std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
         } else nontrivial( std::move( s.erasure() ), & this->erasure(), dest_alloc );
@@ -629,10 +629,10 @@ protected:
     }
     
     // Adopt by copy.
-    template< typename allocator_in = void >
-    void init( wrapper_base const & s, allocator_in const * dest_alloc = nullptr ) {
+    template< typename allocator = void >
+    void init( wrapper_base const & s, allocator const * dest_alloc = nullptr ) {
         decltype (erasure_utility::copy_constructor) nontrivial;
-        if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator_in. Save an access in pointer-like target case otherwise.
+        if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
             || ! ( nontrivial = s.erasure().table.copy_constructor ) ) {
             std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
         } else nontrivial( s.erasure(), & this->erasure(), dest_alloc );
@@ -760,12 +760,12 @@ bool >::type is_empty_wrapper( target *, wrapper_base< free ... > const * arg )
     { return ! * arg; }
 inline bool is_empty_wrapper( ... ) { return false; }
 
-template< bool is_compatibly_wrapped, typename target, typename allocator_in >
+template< bool is_compatibly_wrapped, typename target, typename allocator >
 struct rebind_allocator_for_source
-    { typedef typename std::allocator_traits< allocator_in >::template rebind_alloc< target > type; };
-template< typename target, typename allocator_in >
-struct rebind_allocator_for_source< true, target, allocator_in >
-    { typedef common_allocator_rebind< allocator_in > type; };
+    { typedef typename std::allocator_traits< allocator >::template rebind_alloc< target > type; };
+template< typename target, typename allocator >
+struct rebind_allocator_for_source< true, target, allocator >
+    { typedef common_allocator_rebind< allocator > type; };
 
 template< typename derived, bool >
 struct nullptr_construction {
@@ -806,18 +806,18 @@ protected: // Queries on potential targets. Shared with container_wrapper.
     struct is_compatibly_wrapped< source, typename source::UGLY(wrapper_type), typename source::wrapper_base >
         : std::true_type {};
     
-    template< typename source, typename allocator_in >
-    bool nontrivial_target( source const & s, allocator_in const * alloc )
+    template< typename source, typename allocator >
+    bool nontrivial_target( source const & s, allocator const * alloc )
         { return impl::nontrivial_target( & s.erasure(), alloc ); } // Use friend relationship with compatible wrappers.
 private:
-    template< typename target, typename allocator_in, typename ... arg >
-    void allocate( allocator_in * alloc, arg && ... a ) {
+    template< typename target, typename allocator, typename ... arg >
+    void allocate( allocator * alloc, arg && ... a ) {
         if ( is_empty_wrapper( (target *) nullptr, & a ... ) ) {
             return emplace_trivial( in_place_t< std::nullptr_t >{} );
         }
-        typedef allocator_erasure< allocator_in, target > erasure;
+        typedef allocator_erasure< allocator, target > erasure;
         // TODO: Add a new erasure template to put the fancy pointer on the heap.
-        static_assert ( sizeof (erasure) <= sizeof storage, "Stateful allocator_in or fancy pointer is too big for polymorphic function wrapper." );
+        static_assert ( sizeof (erasure) <= sizeof storage, "Stateful allocator or fancy pointer is too big for polymorphic function wrapper." );
         new (storage_address()) erasure( tag< typename target_policy::copies, sig ... >{}, std::allocator_arg, * alloc, std::forward< arg >( a ) ... );
     }
     
@@ -826,9 +826,9 @@ private:
     typename std::enable_if< ! is_compatibly_wrapped< typename std::decay< source >::type >::value >::type
     init( source && s )
         { emplace< typename std::decay< source >::type >( std::forward< source >( s ) ); }
-    template< typename source, typename allocator_in >
+    template< typename source, typename allocator >
     typename std::enable_if< ! is_compatibly_wrapped< typename std::decay< source >::type >::value >::type
-    init( source && s, allocator_in * a )
+    init( source && s, allocator * a )
         { allocate< typename std::decay< source >::type >( a, std::forward< source >( s ) ); }
     
     template< typename source, typename ... arg >
@@ -861,9 +861,9 @@ public:
         { init( s ); }
     
 MSVC_SKIP ( // MSVC cannot parse deprecated constructor templates, so remove this entirely.
-    template< typename allocator_in >
+    template< typename allocator >
     deprecated( "This constructor ignores its allocator argument. Specify allocation per-target or use function_container instead." )
-    wrapper( std::allocator_arg_t, allocator_in const & ) NON_NULLPTR_CONSTRUCT
+    wrapper( std::allocator_arg_t, allocator const & ) NON_NULLPTR_CONSTRUCT
         { init( in_place_t< std::nullptr_t >{}, nullptr ); }
 )
     template< typename source,
@@ -876,17 +876,17 @@ MSVC_SKIP ( // MSVC cannot parse deprecated constructor templates, so remove thi
             || is_compatibly_wrapped< source >::value ) NON_NULLPTR_CONSTRUCT
         { init( std::forward< source >( s ) ); }
     
-    template< typename allocator_in, typename source,
+    template< typename allocator, typename source,
         typename = typename std::enable_if<
             is_targetable< typename std::decay< source >::type >::value
         >::type >
-    wrapper( std::allocator_arg_t, allocator_in && alloc, source && s )
+    wrapper( std::allocator_arg_t, allocator && alloc, source && s )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value ) NON_NULLPTR_CONSTRUCT {
-        // Adapt the allocator_in to the source. If it's already an rvalue of the right type, use it in-place.
+        // Adapt the allocator to the source. If it's already an rvalue of the right type, use it in-place.
         // It might make more sense to use modifiable lvalues in-place, but this is closer to the standard.
         typename rebind_allocator_for_source< is_compatibly_wrapped< typename std::decay< source >::type >::value,
-            typename std::decay< source >::type, typename std::decay< allocator_in >::type
-        >::type && target_alloc = value( std::forward< allocator_in >( alloc ) );
+            typename std::decay< source >::type, typename std::decay< allocator >::type
+        >::type && target_alloc = value( std::forward< allocator >( alloc ) );
         init( std::forward< source >( s ), & target_alloc );
     }
     
@@ -896,14 +896,14 @@ MSVC_SKIP ( // MSVC cannot parse deprecated constructor templates, so remove thi
     noexcept( is_noexcept_erasable< target >::value )
         { emplace< target >( std::forward< arg >( a ) ... ); }
     
-    template< typename allocator_in, typename target, typename ... arg,
+    template< typename allocator, typename target, typename ... arg,
         typename = typename std::enable_if<
             is_targetable< target >::value
         >::type >
-    wrapper( std::allocator_arg_t, allocator_in && alloc, in_place_t< target >, arg && ... a )
+    wrapper( std::allocator_arg_t, allocator && alloc, in_place_t< target >, arg && ... a )
     noexcept( is_noexcept_erasable< target >::value ) {
-        typename std::allocator_traits< typename std::decay< allocator_in >::type >::template rebind_alloc< target >
-            && target_alloc = value( std::forward< allocator_in >( alloc ) );
+        typename std::allocator_traits< typename std::decay< allocator >::type >::template rebind_alloc< target >
+            && target_alloc = value( std::forward< allocator >( alloc ) );
         allocate< target >( & target_alloc, std::forward< arg >( a ) ... );
     }
     #undef NON_NULLPTR_CONSTRUCT
@@ -925,8 +925,8 @@ MSVC_SKIP ( // MSVC cannot parse deprecated constructor templates, so remove thi
     >::type operator = ( source && s )
         { wrapper::wrapper_base::operator = ( wrapper( std::forward< source >( s ) ) ); }
     
-    template< typename source, typename allocator_in >
-    void assign( source && s, allocator_in const & alloc )
+    template< typename source, typename allocator >
+    void assign( source && s, allocator const & alloc )
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value )
         { * this = wrapper( std::allocator_arg, alloc, std::forward< source >( s ) ); }
     
@@ -936,8 +936,8 @@ MSVC_SKIP ( // MSVC cannot parse deprecated constructor templates, so remove thi
     noexcept( is_noexcept_erasable< source >::value )
         { * this = wrapper( in_place_t< source >{}, std::forward< arg >( a ) ... ); }
     
-    template< typename source, typename allocator_in, typename ... arg >
-    void allocate_assign( allocator_in const & alloc, arg && ... a )
+    template< typename source, typename allocator, typename ... arg >
+    void allocate_assign( allocator const & alloc, arg && ... a )
     noexcept( is_noexcept_erasable< source >::value )
         { * this = wrapper( std::allocator_arg, alloc, in_place_t< source >{}, std::forward< arg >( a ) ... ); }
     
@@ -957,18 +957,18 @@ void assign_allocator( std::true_type, saved_allocator * d, used_allocator * s )
     { * d = std::move( * s ); }
 inline void assign_allocator( std::false_type, void *, void const * ) {}
 
-template< typename allocator_in >
-void allocator_swap( std::true_type, allocator_in * lhs, allocator_in * rhs )
+template< typename allocator >
+void allocator_swap( std::true_type, allocator * lhs, allocator * rhs )
     { std::iter_swap( lhs, rhs ); }
-template< typename allocator_in >
-void allocator_swap( std::false_type, allocator_in * lhs, allocator_in * rhs )
+template< typename allocator >
+void allocator_swap( std::false_type, allocator * lhs, allocator * rhs )
     { assert ( * lhs == * rhs && "Cannot swap containers with non-swapping, unequal allocators." ); }
 
-template< typename source > // If the propagation trait is true_type, and the source is a compatible container, then get its allocator_in.
+template< typename source > // If the propagation trait is true_type, and the source is a compatible container, then get its allocator.
 typename source::UGLY(common_allocator) && select_allocator( std::true_type, void *, source const * s )
     { return std::move( s->saved_allocator() ); }
-template< typename allocator_in >
-allocator_in && select_allocator( std::false_type, allocator_in * a, void const * )
+template< typename allocator >
+allocator && select_allocator( std::false_type, allocator * a, void const * )
     { return std::move( * a ); }
 
 /*  One or two Allocator objects are stored in a container_wrapper. The allocator base class below is rebound to <char> by common_allocator_rebind.
@@ -1005,8 +1005,8 @@ class container_wrapper
     }
     template< typename = allocator_in, typename propagate = std::false_type, typename source >
     void assign( std::true_type, source && s ) noexcept { // Source is a compatible container_wrapper rvalue or it is pointer-like.
-        assign_allocator( propagate{}, & saved_allocator(), & s ); // Terminate upon throwing allocator_in move assignment.
-        wrapper::operator = ( std::forward< source >( s ) ); // Nothing aside from propagation can modify the allocator_in.
+        assign_allocator( propagate{}, & saved_allocator(), & s ); // Terminate upon throwing allocator move assignment.
+        wrapper::operator = ( std::forward< source >( s ) ); // Nothing aside from propagation can modify the allocator.
     }
     
 protected:
