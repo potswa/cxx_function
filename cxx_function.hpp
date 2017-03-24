@@ -381,11 +381,11 @@ struct allocator_erasure
     void construct_safely( arg && ... a ) try {
         allocator_traits::construct( alloc(), target_address(), std::forward< arg >( a ) ... );
     } catch (...) {
-        allocator_traits::deallocate( alloc(), target, 1 ); // Does not throw according to [allocator_in.requirements] §17.6.3.5 and DR2384.
+        allocator_traits::deallocate( alloc(), target, 1 ); // Does not throw according to [allocator.requirements] §17.6.3.5 and DR2384.
         throw;
-    } // The wrapper allocator_in instance cannot be updated following a failed initialization because the erasure allocator_in is already gone.
+    } // The wrapper allocator instance cannot be updated following a failed initialization because the erasure allocator is already gone.
     
-    allocator_erasure( allocator_erasure && ) = default; // Called by move( true_type{}, ... ) when allocator_in or pointer is nontrivially movable.
+    allocator_erasure( allocator_erasure && ) = default; // Called by move( true_type{}, ... ) when allocator or pointer is nontrivially movable.
     allocator_erasure( allocator_erasure const & ) = delete;
     
     template< typename copyable, typename ... sig, typename ... arg >
@@ -406,7 +406,7 @@ private:
     }
 public:
     void move( std::true_type, void * dest, void const * ) noexcept { // Call ordinary move constructor.
-        new (dest) allocator_erasure( std::move( * this ) ); // Move the pointer, not the object. Don't call the allocator_in at all.
+        new (dest) allocator_erasure( std::move( * this ) ); // Move the pointer, not the object. Don't call the allocator at all.
         this-> ~ allocator_erasure();
     }
     void move( std::false_type, void * dest, void const * dest_allocator_v ) {
@@ -419,7 +419,7 @@ public:
             destroy( * this );
         }
     }
-    // [*_]allocator_v points to the wrapper allocator_in instance, if any.
+    // [*_]allocator_v points to the wrapper allocator instance, if any.
     static void move( erasure_base && self_base, void * dest, void const * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure & >( self_base );
         // is_always_equal is usually false here, because it correlates with triviality which short-circuits this function.
