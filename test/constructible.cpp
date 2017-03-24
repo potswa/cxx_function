@@ -110,6 +110,11 @@ int main () {
     };
     
     function< int( int ) > x = s{ 3 };
+    #if __GNUC__ && defined(__has_warning)
+    #   if __has_warning("-Wself-move")
+    #       pragma GCC diagnostic ignored "-Wself-move"
+    #   endif
+    #endif
     x = std::move( x );
     assert ( x( 5 ) == 3 );
 }
