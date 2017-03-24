@@ -1142,6 +1142,7 @@ class function
     typedef typename function::wrapper wrapper;
 public:
     typedef function UGLY(wrapper_type);
+    MSVC_FIX( typedef typename wrapper::wrapper_base wrapper_base; ) // Help MSVC with name lookup through inheritance and friendship.
     using wrapper::wrapper;
     
     function() noexcept = default; // Investigate why these are needed. Compiler bug?
@@ -1187,6 +1188,7 @@ class unique_function
     typedef typename unique_function::wrapper wrapper;
 public:
     typedef unique_function UGLY(wrapper_type);
+    MSVC_FIX( typedef typename wrapper::wrapper_base wrapper_base; )
     using wrapper::wrapper;
     
     unique_function() noexcept = default;
@@ -1231,6 +1233,7 @@ class function_container
     typedef typename function_container::container_wrapper wrapper;
 public:
     typedef function_container UGLY(wrapper_type);
+    MSVC_FIX( typedef typename wrapper::wrapper_base wrapper_base; )
     using MSVC_FIX (UGLY(common_allocator) =) typename function_container::wrapper::UGLY(common_allocator);
     
     function_container() = default; // Investigate why these are needed. Compiler bug?
@@ -1297,6 +1300,7 @@ class unique_function_container
     typedef typename unique_function_container::container_wrapper wrapper;
 public:
     typedef unique_function_container UGLY(wrapper_type);
+    MSVC_FIX( typedef typename wrapper::wrapper_base wrapper_base; )
     using MSVC_FIX (UGLY(common_allocator) =) typename unique_function_container::wrapper::UGLY(common_allocator);
     
     unique_function_container() = default;
