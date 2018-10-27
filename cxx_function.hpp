@@ -109,7 +109,7 @@ template< typename ... > struct tag {};
 // "Abstract" base class for the island inside the wrapper class, e.g. std::function.
 // This must appear first in the wrapper class layout.
 struct erasure_base {
-    struct erasure_utility const & table;
+    struct erasure_utility const * table;
     
     template< typename derived, typename copyable, typename ... sig >
     erasure_base( tag< derived, copyable, sig ... > ); // Parameters are valueless tags for template deduction.
@@ -264,7 +264,7 @@ make_erasure_table< erasure, copyable, sig ... >::value MSVC_FIX( VTABLE_INITIAL
 
 template< typename derived, typename copyable, typename ... sig >
 erasure_base::erasure_base( tag< derived, copyable, sig ... > )
-    : table( make_erasure_table< derived, copyable, sig ... >::value.utility ) {}
+    : table( &make_erasure_table< derived, copyable, sig ... >::value.utility ) {}
 
 
 // Implement the uninitialized state.
@@ -605,7 +605,7 @@ struct allocator_mismatch_error : std::exception // This should be implemented i
 template< typename erasure_base, typename allocator >
 typename std::enable_if< ! std::is_void< allocator >::value,
 bool >::type nontrivial_target( erasure_base const * e, allocator const * ) {
-    std::type_info const * type = e->table.allocator_type;
+    std::type_info const * type = e->table->allocator_type;
     if ( type == nullptr ) return false; // It's a raw pointer, PTMF, reference_wrapper, or nullptr.
     if ( * type != typeid (allocator) ) throw allocator_mismatch_error{}; // Target belongs to a different allocation scheme.
     return true;
@@ -630,8 +630,8 @@ protected:
     void init( wrapper_base && s, allocator const * dest_alloc = nullptr ) {
         decltype (erasure_utility::move_constructor_destructor) nontrivial;
         if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
-            || ! ( nontrivial = s.erasure().table.move_constructor_destructor ) ) {
-            std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
+            || ! ( nontrivial = s.erasure().table->move_constructor_destructor ) ) {
+          std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
         } else nontrivial( std::move( s.erasure() ), & this->erasure(), dest_alloc );
         s.emplace_trivial( in_place_t< std::nullptr_t >{} );
     }
@@ -641,7 +641,7 @@ protected:
     void init( wrapper_base const & s, allocator const * dest_alloc = nullptr ) {
         decltype (erasure_utility::copy_constructor) nontrivial;
         if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
-            || ! ( nontrivial = s.erasure().table.copy_constructor ) ) {
+            || ! ( nontrivial = s.erasure().table->copy_constructor ) ) {
             std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
         } else nontrivial( s.erasure(), & this->erasure(), dest_alloc );
     }
@@ -667,26 +667,26 @@ protected:
     }
     
     void destroy() noexcept {
-        auto nontrivial = erasure().table.destructor;
+        auto nontrivial = erasure().table->destructor;
         if ( nontrivial ) nontrivial( erasure() );
     }
     
     // Implement erasure type verification for always-local targets without touching RTTI.
     bool verify_type_impl( void * ) const noexcept
-        { return & erasure().table == & make_erasure_table< null_erasure, std::false_type, free ... >::value.utility; }
+        { return erasure().table == & make_erasure_table< null_erasure, std::false_type, free ... >::value.utility; }
     
     template< typename t >
     bool verify_type_impl( std::reference_wrapper< t > * ) const noexcept {
-        return & erasure().table
+        return erasure().table
             == & make_erasure_table< local_erasure< std::reference_wrapper< t > >, std::false_type, free ... >::value.utility;
     }
     template< typename t >
     bool verify_type_impl( t ** ) const noexcept
-        { return & erasure().table == & make_erasure_table< local_erasure< t * >, std::false_type, free ... >::value.utility; }
+        { return erasure().table == & make_erasure_table< local_erasure< t * >, std::false_type, free ... >::value.utility; }
     
     template< typename t, typename c >
     bool verify_type_impl( t c::** ) const noexcept
-        { return & erasure().table == & make_erasure_table< ptm_erasure< t c::* >, std::false_type, free ... >::value.utility; }
+        { return erasure().table == & make_erasure_table< ptm_erasure< t c::* >, std::false_type, free ... >::value.utility; }
     
     // User-defined class types are never guaranteed to be local. There could exist some allocator for which uses_allocator is true.
     // RTTI could be replaced here by a small variable template linked from the table. Since we need it anyway, just use RTTI.
@@ -719,12 +719,12 @@ public:
     template< std::size_t table_index, typename ret, typename ... arg >
     ret call( arg && ... a ) const {
         return get< table_index, ret( erasure_base const &, arg && ... ) >
-            ( reinterpret_cast< erasure_table< free ... > const & >( erasure().table ).dispatch )
+            ( reinterpret_cast< erasure_table< free ... > const & >( *erasure().table ).dispatch )
             ( erasure(), std::forward< arg >( a ) ... );
     }
     
     std::type_info const & target_type() const noexcept
-        { return erasure().table.target_type; }
+        { return erasure().table->target_type; }
     
     template< typename want >
     bool verify_type() const noexcept {
@@ -736,14 +736,14 @@ public:
         { return const_cast< wrapper_base const * >( this )->verify_type< want >(); }
     
     void const * complete_object_address() const noexcept
-        { return erasure().table.target_access( erasure() ); }
+        { return erasure().table->target_access( erasure() ); }
     void const volatile * complete_object_address() const volatile noexcept
         { return const_cast< wrapper_base const * >( this )->complete_object_address(); }
     
     template< typename want >
     want const * target() const noexcept {
         if ( ! verify_type< want >() ) return nullptr;
-        return static_cast< want const * >( erasure().table.target_access( erasure() ) );
+        return static_cast< want const * >( erasure().table->target_access( erasure() ) );
     }
     template< typename want >
     want * target() noexcept
