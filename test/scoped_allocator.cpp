@@ -118,7 +118,10 @@ int main() {
         assert ( pre - pool[ 3 ] == op.state.capacity() + 1 );
     }
     assert ( fc2.target< stateful_op >() );
-    fc2 = listful_op( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
+    {
+        listful_op new_target( fc2.target< stateful_op >()->state, pool_alloc< char >{ 2 } );
+        fc2 = std::move( new_target );
+    }
     fc1 = fc2;
 #if ! _MSC_VER || _MSC_VER >= 1910
     fv = nullptr;
