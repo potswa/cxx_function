@@ -103,6 +103,21 @@ namespace impl {
         : std::integral_constant< bool, ! cond::value > {};
 #endif
 
+template< typename T >
+T launder_cast( void * p )
+    { return
+#if __cpp_lib_launder || __clang_major__ >= 6 && __cplusplus >= 201703L
+                std::launder
+#endif
+                            ( static_cast< T >( p ) ); }
+template< typename T >
+T launder_cast( void const * p )
+    { return
+#if __cpp_lib_launder || __clang_major__ >= 6 && __cplusplus >= 201703L
+                std::launder
+#endif
+                            ( static_cast< T >( p ) ); }
+
 // General-purpose dispatch tag.
 template< typename ... > struct tag {};
 
@@ -714,9 +729,9 @@ protected:
         { return target_type() == typeid (want); }
 public:
     erasure_base & erasure()
-        { return reinterpret_cast< erasure_base & >( storage ); }
+        { return * launder_cast< erasure_base * >( & storage ); }
     erasure_base const & erasure() const
-        { return reinterpret_cast< erasure_base const & >( storage ); }
+        { return * launder_cast< erasure_base const * >( & storage ); }
     
     void operator = ( wrapper_base && s ) noexcept { // Only suitable for generating implicit members in derived classes: wrong return type.
         destroy();
@@ -738,7 +753,7 @@ public:
     template< std::size_t table_index, typename ret, typename ... arg >
     ret call( arg && ... a ) const {
         return get< table_index, ret( erasure_base const &, arg && ... ) >
-            ( reinterpret_cast< erasure_table< free ... > const & >( * erasure().table ).dispatch )
+            ( launder_cast< erasure_table< free ... > const * >( erasure().table )->dispatch )
             ( erasure(), std::forward< arg >( a ) ... );
     }
     
