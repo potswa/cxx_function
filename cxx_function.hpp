@@ -428,10 +428,11 @@ public:
     static void copy( erasure_base const & self_base, void * dest, void const * dest_allocator_v ) {
         auto & self = static_cast< allocator_erasure const & >( self_base );
         // Structure the control flow differently to avoid instantiating the copy constructor.
-        allocator_in const & dest_allocator = dest_allocator_v?
-            static_cast< allocator_in const & >( * static_cast< common_allocator const * >( dest_allocator_v ) )
-            : self.alloc();
-        new (dest) allocator_erasure( std::allocator_arg, dest_allocator, self );
+        new (dest) allocator_erasure( std::allocator_arg,
+            dest_allocator_v?
+                static_cast< allocator_in const & >( * static_cast< common_allocator const * >( dest_allocator_v ) )
+                : self.alloc(),
+            self );
     }
     static void destroy( erasure_base & self_base ) noexcept {
         auto & self = static_cast< allocator_erasure & >( self_base );
