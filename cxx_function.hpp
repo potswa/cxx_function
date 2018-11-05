@@ -661,12 +661,16 @@ protected:
     // Default, move, and copy construction.
     // Adopt by move.
     template< typename allocator = void > // Allocator is already rebound to <char>.
-    void init( wrapper_base && s, allocator const * dest_alloc = nullptr ) {
+    void init_dirty( wrapper_base & s, allocator const * dest_alloc = nullptr ) {
         decltype (erasure_utility::move_constructor_destructor) nontrivial;
         if ( ! nontrivial_target( & s.erasure(), dest_alloc ) // No-op without an allocator. Save an access in pointer-like target case otherwise.
             || ! ( nontrivial = s.erasure().table->move_constructor_destructor ) ) {
             std::memcpy( & this->erasure(), & s.erasure(), sizeof (storage) );
         } else nontrivial( std::move( s.erasure() ), & this->erasure(), dest_alloc );
+    }
+    template< typename allocator = void > // Allocator is already rebound to <char>.
+    void init( wrapper_base && s, allocator const * dest_alloc = nullptr ) {
+        init_dirty( s, dest_alloc );
         s.emplace_trivial( in_place_t< std::nullptr_t >{} );
     }
     
@@ -785,6 +789,14 @@ public:
     
     explicit operator bool () const volatile noexcept
         { return ! verify_type< void >(); }
+    
+    void swap( wrapper_base & o ) noexcept { // Essentially same as std::swap, but skip some trivial destructors.
+        // Would be nice to use swap_ranges on trivially-copyable target storage. Double-check that launder can handle it.
+        wrapper_base temp; // This class is trivially constructed and destroyed.
+        temp.init_dirty( * this );
+        init_dirty( o );
+        o.init_dirty( temp );
+    }
 };
 
 template< typename t >
@@ -985,13 +997,6 @@ MSVC_SKIP ( // MSVC cannot parse deprecated constructor templates, so remove thi
     
     ~ wrapper() noexcept
         { this->destroy(); }
-    
-    void swap( wrapper & o ) noexcept { // Essentially same as std::swap, but skip a couple trivial destructors.
-        // Would be nice to use swap_ranges on trivially-copyable target storage, but that wouldn't correctly handle lifetimes in the upcoming rules.
-        wrapper temp{ std::move( * this ) };
-        init( in_place_t< wrapper >{}, std::move( o ) );
-        o.init( in_place_t< wrapper >{}, std::move( temp ) );
-    }
 };
 
 template< typename saved_allocator, typename used_allocator >
@@ -1209,7 +1214,7 @@ public:
         { wrapper::operator = ( std::forward< source >( s ) ); return * this; }
     
     using wrapper::operator ();
-    using wrapper::swap;
+    void swap( function & o ) { return wrapper::swap( o ); }
     using wrapper::target;
     using wrapper::target_type;
     using wrapper::verify_type;
@@ -1250,7 +1255,7 @@ public:
         { wrapper::operator = ( std::forward< source >( s ) ); return * this; }
     
     using wrapper::operator ();
-    using wrapper::swap;
+    void swap( unique_function & o ) { return wrapper::swap( o ); }
     using wrapper::target;
     using wrapper::target_type;
     using wrapper::verify_type;
@@ -1377,7 +1382,7 @@ public:
         { wrapper::operator = ( std::forward< source >( s ) ); return * this; }
     
     using wrapper::operator ();
-    using wrapper::swap;
+    void swap( unique_function_container & o ) { return wrapper::swap( o ); }
     using wrapper::target;
     using wrapper::target_type;
     using wrapper::verify_type;
