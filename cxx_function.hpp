@@ -1099,8 +1099,8 @@ public:
     noexcept( is_noexcept_erasable< typename std::decay< source >::type >::value )
         : container_wrapper( std::allocator_arg, {}, t, std::forward< arg >( a ) ... ) {}
     
-    container_wrapper & operator = ( container_wrapper && s ) = delete; // Always assign [unique_]function_container instead, for conversion to unique.
-    container_wrapper & operator = ( container_wrapper const & s ) = delete;
+    container_wrapper & operator = ( container_wrapper && ) = delete; // Always assign [unique_]function_container instead, for conversion to unique.
+    container_wrapper & operator = ( container_wrapper const & ) = delete;
     
     template< typename source >
     typename std::enable_if< conjunction<
@@ -1184,7 +1184,7 @@ public:
     using wrapper::wrapper;
     
     function() noexcept = default; // Investigate why these are needed. Compiler bug?
-    function( function && s ) noexcept = default;
+    function( function && ) noexcept = default;
     function( function const & ) = default;
     
     function & operator = ( function && o ) noexcept {
@@ -1230,14 +1230,14 @@ public:
     using wrapper::wrapper;
     
     unique_function() noexcept = default;
-    unique_function( unique_function && s ) noexcept = default;
+    unique_function( unique_function && ) noexcept = default;
     unique_function( unique_function const & ) = delete;
     
     unique_function & operator = ( unique_function && o ) noexcept {
         if ( & o != this ) wrapper::operator = ( static_cast< wrapper && >( o ) );
         return * this;
     }
-    unique_function & operator = ( unique_function const & o ) = delete;
+    unique_function & operator = ( unique_function const & ) = delete;
     
     template< typename source >
     typename std::enable_if< std::is_constructible< wrapper, source >::value,
@@ -1275,7 +1275,7 @@ public:
     using MSVC_FIX (UGLY(common_allocator) =) typename function_container::wrapper::UGLY(common_allocator);
     
     function_container() = default; // Investigate why these are needed. Compiler bug?
-    function_container( function_container && s ) noexcept = default;
+    function_container( function_container && ) noexcept = default;
     function_container( function_container const & ) = default;
     
     explicit function_container( allocator_in const & alloc ) noexcept
@@ -1342,7 +1342,7 @@ public:
     using MSVC_FIX (UGLY(common_allocator) =) typename unique_function_container::wrapper::UGLY(common_allocator);
     
     unique_function_container() = default;
-    unique_function_container( unique_function_container && s ) noexcept = default;
+    unique_function_container( unique_function_container && ) noexcept = default;
     unique_function_container( unique_function_container const & ) = delete;
     
     template< typename source, typename std::enable_if<
@@ -1364,7 +1364,7 @@ public:
         if ( & s != this ) wrapper::operator = ( std::move( s ) );
         return * this;
     }
-    unique_function_container & operator = ( unique_function_container const & s ) = delete;
+    unique_function_container & operator = ( unique_function_container const & ) = delete;
     
     template< typename source >
     typename std::enable_if< wrapper::template is_targetable< typename std::decay< source >::type >::value,
