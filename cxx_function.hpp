@@ -503,6 +503,12 @@ struct is_safely_convertible
         std::is_convertible< from, to >
     >::type {};
 
+#if __cpp_lib_is_invocable || __cplusplus >= 201703L && __clang_major__ >= 6
+#   define INVOKE_RESULT( T, ARG ) invoke_result< T, ARG >
+#else
+#   define INVOKE_RESULT( T, ARG ) result_of< T( ARG ) >
+#endif
+
 template< typename t, typename sig, typename = void >
 struct is_callable : std::false_type {};
 
@@ -510,11 +516,12 @@ struct is_callable : std::false_type {};
 template< typename t, typename ret, typename ... arg > \
 struct is_callable< t, ret( arg ... ) FN_QUALS, \
     typename std::enable_if< is_safely_convertible< \
-        typename std::result_of< t TYPE_QUALS ( arg ... ) >::type \
+        typename std::INVOKE_RESULT( t TYPE_QUALS, arg ... )::type \
     , ret >::value >::type > \
     : std::true_type {};
 DISPATCH_CVOBJQ( IS_CALLABLE_CASE, IGNORE, , )
 #undef IS_CALLABLE_CASE
+#undef INVOKE_RESULT
 
 template< typename sig >
 struct is_callable< std::nullptr_t, sig >
