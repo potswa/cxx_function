@@ -522,16 +522,18 @@ struct is_callable< std::nullptr_t, sig >
 
 #if __cpp_noexcept_function_type
 
-#   if __GNUC__ && ! __clang__ && __GNUC__ < 7
-#       define IS_NOTHROW_INVOKABLE is_nothrow_callable
+#   if __cpp_lib_is_invocable || __clang_major__ >= 6
+#       define IS_NOTHROW_INVOKABLE( T, ARG, RET ) is_nothrow_invocable_r< RET, T, ARG >
+#   elif __GNUC__ && ! __clang__ && __GNUC__ < 7
+#       define IS_NOTHROW_INVOKABLE( T, ARG, RET ) is_nothrow_invocable< T( ARG ), RET >
 #   else
-#       define IS_NOTHROW_INVOKABLE is_nothrow_invocable
+#       define IS_NOTHROW_INVOKABLE( T, ARG, RET ) is_nothrow_callable< T( ARG ), RET >
 #   endif
 
 #   define NOEXCEPT_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
     template< typename t, typename ret, typename ... arg > \
     struct is_callable< t, ret( arg ... ) FN_QUALS noexcept, \
-        typename std::enable_if< std::IS_NOTHROW_INVOKABLE< t TYPE_QUALS ( arg ... ), ret >::value >::type > \
+        typename std::enable_if< std::IS_NOTHROW_INVOKABLE( t TYPE_QUALS, arg ..., ret )::value >::type > \
         : is_callable< t, ret( arg ... ) FN_QUALS > {};
     DISPATCH_CVOBJQ( NOEXCEPT_CASE, IGNORE, , )
 #   undef NOEXCEPT_CASE
