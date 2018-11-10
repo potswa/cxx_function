@@ -493,32 +493,15 @@ template< typename from, typename to > // From is reference type. Allow user-def
 struct is_bad_return< from &, to > // Forbid converting an lvalue to a reference unless it's a class or the types match.
     : conjunction< negation< std::is_same< typename std::remove_cv< from >::type, to > >, negation< std::is_class< from > > > {};
 
-#if __cpp_lib_is_invocable || __clang_major__ >= 6 && __cplusplus >= 201703L
-    using std::is_invocable_r;
-#else
-    template< typename from, typename to >
-    struct is_safely_convertible
-        : conjunction<
-            negation< conjunction< // Prevent binding a return value to a temporary.
-                std::is_reference< to >,
-                is_bad_return< from, typename std::decay< to >::type >
-            > >,
-            std::is_convertible< from, to >
-        >::type {};
-    
-    template< typename ret, typename sig, typename = void >
-    struct is_invocable_r_impl : std::false_type {};
-    
-    template< typename ret, typename sig >
-    struct is_invocable_r_impl< sig, ret,
-        typename std::enable_if< is_safely_convertible<
-            typename std::result_of< sig >::type, ret
-        >::value >::type >
-        : std::true_type {};
-    
-    template< typename ret, typename t, typename ... arg >
-    struct is_invocable_r : is_invocable_r_impl< t( arg ... ), ret >::type {};
-#endif
+template< typename from, typename to >
+struct is_safely_convertible
+    : conjunction<
+        negation< conjunction< // Prevent binding a return value to a temporary.
+            std::is_reference< to >,
+            is_bad_return< from, typename std::decay< to >::type >
+        > >,
+        std::is_convertible< from, to >
+    >::type {};
 
 template< typename t, typename sig, typename = void >
 struct is_callable : std::false_type {};
@@ -526,7 +509,9 @@ struct is_callable : std::false_type {};
 #define IS_CALLABLE_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
 template< typename t, typename ret, typename ... arg > \
 struct is_callable< t, ret( arg ... ) FN_QUALS, \
-    typename std::enable_if< is_invocable_r< ret, t TYPE_QUALS, arg ... >::value >::type > \
+    typename std::enable_if< is_safely_convertible< \
+        typename std::result_of< t TYPE_QUALS ( arg ... ) >::type \
+    , ret >::value >::type > \
     : std::true_type {};
 DISPATCH_CVOBJQ( IS_CALLABLE_CASE, IGNORE, , )
 #undef IS_CALLABLE_CASE
@@ -537,19 +522,16 @@ struct is_callable< std::nullptr_t, sig >
 
 #if __cpp_noexcept_function_type
 
-// This may look like it should be more similar to is_invocable_r, but the purpose and compatibility challenges are very different.
-#   if __cpp_lib_is_invocable || __clang_major__ >= 6
-#       define IS_NOTHROW_INVOKABLE( T, ARG, RET ) is_nothrow_invocable_r< RET, T, ARG >
-#   elif __GNUC__ && ! __clang__ && __GNUC__ < 7
-#       define IS_NOTHROW_INVOKABLE( T, ARG, RET ) is_nothrow_invocable< T( ARG ), RET >
+#   if __GNUC__ && ! __clang__ && __GNUC__ < 7
+#       define IS_NOTHROW_INVOKABLE is_nothrow_callable
 #   else
-#       define IS_NOTHROW_INVOKABLE( T, ARG, RET ) is_nothrow_callable< T( ARG ), RET >
+#       define IS_NOTHROW_INVOKABLE is_nothrow_invocable
 #   endif
 
 #   define NOEXCEPT_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
     template< typename t, typename ret, typename ... arg > \
     struct is_callable< t, ret( arg ... ) FN_QUALS noexcept, \
-        typename std::enable_if< std::IS_NOTHROW_INVOKABLE( t TYPE_QUALS, arg ..., ret )::value >::type > \
+        typename std::enable_if< std::IS_NOTHROW_INVOKABLE< t TYPE_QUALS ( arg ... ), ret >::value >::type > \
         : is_callable< t, ret( arg ... ) FN_QUALS > {};
     DISPATCH_CVOBJQ( NOEXCEPT_CASE, IGNORE, , )
 #   undef NOEXCEPT_CASE
