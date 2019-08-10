@@ -190,7 +190,6 @@ struct transfer_sig_qualifiers;
 template< typename ret, typename ... arg, typename target > \
 struct transfer_sig_qualifiers< ret( arg ... ) FN_QUALS, target > \
     { typedef target TYPE_QUALS type; };
-#define NOEXCEPT
 DISPATCH_ALL( TRANSFER_QUALS_CASE )
 #undef TRANSFER_QUALS_CASE
 
