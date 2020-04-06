@@ -45,7 +45,11 @@ namespace impl {
 #   define OLD_GCC_FIX(...) __VA_ARGS__
 #   define OLD_GCC_SKIP(...)
 #else
+#if __cplusplus < 201402L
+#   define deprecated(MSG) __attribute__((deprecated (MSG)))
+#else
 #   define deprecated(MSG) [[deprecated (MSG)]]
+#endif
 
 #   define OLD_GCC_FIX(...)
 #   define OLD_GCC_SKIP(...) __VA_ARGS__
