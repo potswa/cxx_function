@@ -36,7 +36,7 @@ namespace impl {
 
 #define UGLY( NAME ) CXX_FUNCTION_ ## NAME
 
-#if __cplusplus < 201402L
+#if __GNUC__ && ! __clang__ && __cplusplus < 201402L
 #   define deprecated(MSG) __attribute__((deprecated (MSG)))
 #else
 #   define deprecated(MSG) [[deprecated (MSG)]]
