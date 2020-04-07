@@ -321,7 +321,7 @@ struct local_erasure
     template< typename sig, typename ret, typename ... arg >
     static ret call( erasure_base const & self, arg ... a )
         // Directly call the name "target," not a reference, to support devirtualization.
-        { return ( (typename transfer_sig_qualifiers< sig, local_erasure const >::type) self ).target( std::forward< arg >( a ) ... ); }
+        { return ( (typename transfer_sig_qualifiers< sig, local_erasure >::type)const_cast<erasure_base&>(self) ).target( std::forward< arg >( a ) ... ); }
 };
 
 // Implement erasures of pointer-to-members, which need std::mem_fn instead of a direct call.
