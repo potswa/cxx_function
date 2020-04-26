@@ -25,9 +25,10 @@ int main() {
     assert ( ! g );
 
     int vf::* ptm = & vf::m;
-    assert ( f( o ) == 42 );
+    f = ptm;
+    o.m = 99;
+    assert ( f( o ) == 99 );
     ptm = nullptr;
     f = ptm;
     assert ( ! f );
 }
-
