@@ -36,17 +36,19 @@ namespace impl {
 
 #define UGLY( NAME ) CXX_FUNCTION_ ## NAME
 
+#if __cplusplus < 201402L && ! _MSC_VER
+#   define deprecated(MSG) __attribute__((deprecated (MSG)))
+#else
+#   define deprecated(MSG) [[deprecated (MSG)]]
+#endif
+
 #if __GNUC__ && ! __clang__ && __GNUC__ < 5
 #   define is_trivially_move_constructible has_trivial_copy_constructor
 #   define is_trivially_copy_constructible has_trivial_copy_constructor
 
-#   define deprecated(MSG) __attribute__((deprecated (MSG)))
-
 #   define OLD_GCC_FIX(...) __VA_ARGS__
 #   define OLD_GCC_SKIP(...)
 #else
-#   define deprecated(MSG) [[deprecated (MSG)]]
-
 #   define OLD_GCC_FIX(...)
 #   define OLD_GCC_SKIP(...) __VA_ARGS__
 #endif
