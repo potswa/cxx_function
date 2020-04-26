@@ -175,13 +175,13 @@ struct member_to_free;
 #define TYPE_CONVERT_CASE( TYPE_QUALS, FN_QUALS, UNSAFE ) \
 template< typename ret, typename ... arg > \
 struct member_to_free< ret( arg ... ) FN_QUALS > \
-    { typedef ret type( erasure_base const &, arg && ... ); };
+    { typedef ret type( erasure_base &, arg && ... ); };
 DISPATCH_ALL( TYPE_CONVERT_CASE )
 #undef TYPE_CONVERT_CASE
 // Allow early, eager conversion without incurring double conversion.
 template< typename ret, typename ... arg >
-struct member_to_free< ret( erasure_base const &, arg ... ) >
-    { typedef ret type( erasure_base const &, arg && ... ); };
+struct member_to_free< ret( erasure_base &, arg ... ) >
+    { typedef ret type( erasure_base &, arg && ... ); };
 
 // Apply given cv-qualifiers and reference category to a new type.
 template< typename source, typename target >
@@ -296,7 +296,7 @@ struct null_erasure
         : erasure_base( tag< null_erasure, std::false_type, sig ... >{} ) {} // Initialize own "vtable pointer" at runtime.
     
     template< typename, typename ret, typename ... arg >
-    static ret call( erasure_base const &, arg ... )
+    static ret call( erasure_base &, arg ... )
         { throw std::bad_function_call{}; }
 };
 
@@ -319,9 +319,9 @@ struct local_erasure
         , target( std::forward< arg >( a ) ... ) {}
     
     template< typename sig, typename ret, typename ... arg >
-    static ret call( erasure_base const & self, arg ... a )
+    static ret call( erasure_base & self, arg ... a )
         // Directly call the name "target," not a reference, to support devirtualization.
-        { return ( (typename transfer_sig_qualifiers< sig, local_erasure >::type) self ).target( std::forward< arg >( a ) ... ); }
+        { return static_cast< typename transfer_sig_qualifiers< sig, local_erasure >::type >( self ).target( std::forward< arg >( a ) ... ); }
 };
 
 // Implement erasures of pointer-to-members, which need std::mem_fn instead of a direct call.
@@ -342,8 +342,8 @@ struct ptm_erasure
         , target( a ) {}
     
     template< typename, typename ret, typename ... arg >
-    static ret call( erasure_base const & self, arg ... a )
-        { return ( std::mem_fn( static_cast< ptm_erasure const & >( self ).target ) )( std::forward< arg >( a ) ... ); }
+    static ret call( erasure_base & self, arg ... a )
+        { return std::mem_fn( static_cast< ptm_erasure const & >( self ).target )( std::forward< arg >( a ) ... ); }
 };
 
 // Implement erasures of objects that cannot be stored inside the wrapper.
@@ -456,7 +456,7 @@ public:
     }
     
     template< typename sig, typename ret, typename ... arg >
-    static ret call( erasure_base const & self, arg ... a ) {
+    static ret call( erasure_base & self, arg ... a ) {
         return std::forward< typename transfer_sig_qualifiers< sig, target_type >::type >
             ( * static_cast< allocator_erasure const & >( self ).target )( std::forward< arg >( a ) ... );
     }
@@ -608,7 +608,7 @@ struct wrapper_dispatch< derived, table_index, ret( arg ... ) FN_QUALS, sig ... 
     using wrapper_dispatch< derived, table_index+1, sig ... \
         UNSAFE (, const_unsafe_case< ret( arg ... ) >) >::operator (); \
     ret operator () ( arg ... a ) FN_QUALS \
-        { return ( (derived const &) * this ).template call< table_index, ret >( std::forward< arg >( a ) ... ); } \
+        { return static_cast< derived & >( const_cast< wrapper_dispatch & >( * this ) ).template call< table_index, ret >( std::forward< arg >( a ) ... ); } \
 };
 DISPATCH_ALL( WRAPPER_CASE )
 #undef WRAPPER_CASE
@@ -620,7 +620,7 @@ struct wrapper_dispatch< derived, n, const_unsafe_case< ret( arg ... ) >, more .
     using wrapper_dispatch< derived, n, more ... >::operator ();
     deprecated( "It is unsafe to call a std::function of non-const signature through a const access path." )
     ret operator () ( arg ... a ) const
-        { return ( (derived &) * this ) ( std::forward< arg >( a ) ... ); }
+        { return static_cast< derived & >( const_cast< wrapper_dispatch & >( * this ) ) ( std::forward< arg >( a ) ... ); }
 };
 
 struct allocator_mismatch_error : std::exception // This should be implemented in a .cpp file, but stay header-only for now.
@@ -745,8 +745,8 @@ public:
     }
     
     template< std::size_t table_index, typename ret, typename ... arg >
-    ret call( arg && ... a ) const {
-        return get< table_index, ret( erasure_base const &, arg && ... ) >
+    ret call( arg && ... a ) {
+        return get< table_index, ret( erasure_base &, arg && ... ) >
             ( launder_cast< erasure_table< free ... > const * >( erasure().table )->dispatch )
             ( erasure(), std::forward< arg >( a ) ... );
     }
