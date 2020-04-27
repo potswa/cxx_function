@@ -1411,14 +1411,17 @@ DEFINE_WRAPPER_OPS( ( unique_function_container< cont, sig ... > ), typename con
 
 #if __cplusplus >= 201402 // Return type deduction really simplifies these.
 // See proposal, "std::recover: undoing type erasure"
+// This section really should be a separate library. It is agnostic to everything above.
 
+namespace impl {
 template< typename erasure >
 void const volatile * recover_address( erasure & e, std::false_type )
     { return e.complete_object_address(); }
 
 template< typename erasure >
 void const volatile * recover_address( erasure & e, std::true_type )
-    { return e.referent_address(); }
+    { return e.referent_address(); } // Not used in the cxx_function library because function wrapper targets are never references, always values.
+}
 
 struct bad_type_recovery : std::exception
     { virtual char const * what() const noexcept override { return "An object was not found with its expected type."; } };
@@ -1430,7 +1433,7 @@ constexpr auto && recover( erasure_ref && e ) {
     typedef std::conditional_t< std::is_volatile< erasure >::value, prop_const volatile, prop_const > prop_cv;
     typedef std::conditional_t< std::is_lvalue_reference< erasure_ref >::value, prop_cv &, prop_cv && > prop_cvref;
     if ( e.template verify_type< want >() ) {
-        return static_cast< prop_cvref >( * ( std::decay_t< want > * ) recover_address( e, std::is_reference< want >{} ) );
+        return static_cast< prop_cvref >( * static_cast< std::decay_t< want > * >( const_cast< void * >( impl::recover_address( e, std::is_reference< want >{} ) ) ) );
     } else throw bad_type_recovery{};
 }
 #endif
